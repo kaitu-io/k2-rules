@@ -1,0 +1,48 @@
+name: Daily Build
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # UTC 00:00 daily
+  workflow_dispatch: {}   # manual trigger
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Build compiler
+        run: go build -o k2-rules-gen .
+
+      - name: Generate rule bundles
+        run: ./k2-rules-gen -o dist
+
+      - name: Show output
+        run: ls -lh dist/
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(date -u +%Y.%m.%d)
+          TAG="v${VERSION}"
+
+          # Delete existing tag/release if re-running same day.
+          gh release delete "${TAG}" --yes 2>/dev/null || true
+          git tag -d "${TAG}" 2>/dev/null || true
+          git push origin ":refs/tags/${TAG}" 2>/dev/null || true
+
+          # Create new release.
+          gh release create "${TAG}" \
+            --title "Rules ${VERSION}" \
+            --notes "Auto-generated from upstream sources. See ATTRIBUTION.md." \
+            dist/overseas.k2b \
+            dist/cn-direct.k2b \
+            dist/manifest.json
