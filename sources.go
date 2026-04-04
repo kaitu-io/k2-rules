@@ -5,90 +5,44 @@ type service struct {
 	Name string
 
 	// Domain sources: v2fly/domain-list-community data/{name} files.
-	// Each entry is a v2fly service name (may differ from Name).
+	// include: directives are resolved recursively.
 	V2flyNames []string
+
+	// ExcludeAttr filters entries with this @ attribute into the exclude list.
+	// For overseas: @cn entries (China-accessible endpoints like google.cn)
+	//   become ExcludeDomainSuffixes — blocked by GFW except these.
+	// For cn-direct: @!cn entries (overseas variants like hk.weibo.com)
+	//   become ExcludeDomainSuffixes — Chinese except these subdomains.
+	ExcludeAttr string
 
 	// IP sources: URLs returning one CIDR per line (plain text).
 	IPURLs []string
+
+	// ComplementIPURL, if set, fetches CIDRs and computes their complement
+	// (all public IPs NOT in the fetched ranges). Used to generate "all
+	// non-Chinese IPs" from geoip-cn — eliminates IP middle ground.
+	ComplementIPURL string
 }
 
-// services defines all rule sets to compile.
-// Organized by company/infrastructure, not individual product.
+// services defines overseas rule sets (sites blocked in China).
+// Uses v2fly/geolocation-!cn (972 files recursive) + orphan blocked sites.
 var services = []service{
 	{
-		Name:       "google",
-		V2flyNames: []string{"google", "youtube"},
-		IPURLs: []string{
-			"https://raw.githubusercontent.com/Loyalsoldier/geoip/release/text/google.txt",
+		Name: "overseas",
+		V2flyNames: []string{
+			"geolocation-!cn",
+			// Orphan files: blocked in China but not in geolocation-!cn.
+			"2ch", "annas-archive", "flibusta", "hdrezka", "kinopub", "meduza",
 		},
-	},
-	{
-		Name:       "facebook",
-		V2flyNames: []string{"facebook", "whatsapp", "instagram", "meta"},
-		IPURLs: []string{
-			"https://raw.githubusercontent.com/Loyalsoldier/geoip/release/text/facebook.txt",
-		},
-	},
-	{
-		Name:       "telegram",
-		V2flyNames: []string{"telegram"},
-		IPURLs: []string{
-			"https://core.telegram.org/resources/cidr.txt",
-			"https://raw.githubusercontent.com/Loyalsoldier/geoip/release/text/telegram.txt",
-		},
-	},
-	{
-		Name:       "twitter",
-		V2flyNames: []string{"twitter"},
-		IPURLs: []string{
-			"https://raw.githubusercontent.com/Loyalsoldier/geoip/release/text/twitter.txt",
-		},
-	},
-	{
-		Name:       "netflix",
-		V2flyNames: []string{"netflix"},
-		IPURLs: []string{
-			"https://raw.githubusercontent.com/Loyalsoldier/geoip/release/text/netflix.txt",
-		},
-	},
-	{
-		Name:       "cloudflare",
-		V2flyNames: nil, // IP-only
-		IPURLs: []string{
-			"https://www.cloudflare.com/ips-v4",
-			"https://www.cloudflare.com/ips-v6",
-		},
-	},
-	{
-		Name:       "fastly",
-		V2flyNames: nil,
-		IPURLs: []string{
-			"https://raw.githubusercontent.com/Loyalsoldier/geoip/release/text/fastly.txt",
-		},
-	},
-	{
-		Name:       "discord",
-		V2flyNames: []string{"discord"},
-	},
-	{
-		Name:       "spotify",
-		V2flyNames: []string{"spotify"},
-	},
-	{
-		Name:       "tiktok",
-		V2flyNames: []string{"tiktok"},
-	},
-	{
-		Name:       "openai",
-		V2flyNames: []string{"openai"},
-	},
-	{
-		Name:       "github",
-		V2flyNames: []string{"github"},
+		ExcludeAttr: "cn", // exclude China-accessible endpoints (google.cn, gstatic.cn)
+		// Complement of geoip-cn: all non-Chinese, non-private IPs.
+		// This ensures every public IP is classified as either cn or overseas.
+		ComplementIPURL: "https://raw.githubusercontent.com/Loyalsoldier/geoip/release/text/cn.txt",
 	},
 }
 
 // cnServices defines China-specific rule sets.
+// Uses v2fly/geolocation-cn (335 files recursive) + orphan China-accessible sites.
 var cnServices = []service{
 	{
 		Name:       "geoip-cn",
@@ -98,11 +52,25 @@ var cnServices = []service{
 		},
 	},
 	{
-		Name:       "cn-sites",
-		V2flyNames: []string{"cn", "bilibili", "baidu", "tencent", "alibaba", "zhihu", "bytedance"},
-	},
-	{
-		Name:       "bilibili",
-		V2flyNames: []string{"bilibili"},
+		Name: "cn-sites",
+		V2flyNames: []string{
+			"geolocation-cn", "tld-cn",
+			// Orphan files: Chinese services not in geolocation-cn.
+			"cnb", "coding", "discuz", "dnspod", "duowan", "mocha",
+			// Orphan files: global infrastructure accessible from China.
+			"amp", "apple-intelligence", "cloudns", "connectivity-check",
+			"dynu", "electron", "google-registry-tld", "jquery", "kernel",
+			"linux", "nodejs", "noip", "ookla-speedtest", "openjsfoundation",
+			"openspeedtest",
+			// Orphan files: brands and services accessible from China.
+			"2kgames", "adjust", "aerogard", "airwick", "aparat", "archive",
+			"asobo", "aviasales", "bethesda", "calgoncarbon", "clearasil",
+			"clearbit", "dettol", "divar", "durex", "enfa", "filimo",
+			"finish", "forza", "idg", "illusion", "kodik", "lumion",
+			"lysol", "meadjohnson", "mihoyo", "mojang", "mortein",
+			"mosmetro", "movefree", "mucinex", "newegg", "nurofen",
+			"ogury", "openx",
+		},
+		ExcludeAttr: "!cn", // exclude overseas variants (hk.weibo.com, jd.hk)
 	},
 }

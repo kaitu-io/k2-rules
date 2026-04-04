@@ -103,15 +103,17 @@ func buildSets(svcs []service, v2flyDir string) ([]bundleSet, error) {
 	for _, svc := range svcs {
 		log.Printf("  %s: ", svc.Name)
 
-		var domains []string
+		var domains, excludeDomains []string
 		for _, name := range svc.V2flyNames {
-			d, err := parseV2flyDomains(filepath.Join(v2flyDir, "data", name))
+			visited := make(map[string]bool)
+			inc, exc, err := parseV2flyRecursive(filepath.Join(v2flyDir, "data"), name, svc.ExcludeAttr, visited)
 			if err != nil {
 				log.Printf("    WARN: v2fly/%s: %v", name, err)
 				continue
 			}
-			domains = append(domains, d...)
-			log.Printf("    v2fly/%s: %d domains", name, len(d))
+			domains = append(domains, inc...)
+			excludeDomains = append(excludeDomains, exc...)
+			log.Printf("    v2fly/%s: %d domains, %d excludes (%d files)", name, len(inc), len(exc), len(visited))
 		}
 
 		var cidrs []string
@@ -125,32 +127,57 @@ func buildSets(svcs []service, v2flyDir string) ([]bundleSet, error) {
 			log.Printf("    %s: %d CIDRs", filepath.Base(u), len(c))
 		}
 
+		// Compute complement if configured (e.g. "all non-Chinese IPs").
+		if svc.ComplementIPURL != "" {
+			excludeCIDRs, err := fetchCIDRs(svc.ComplementIPURL)
+			if err != nil {
+				log.Printf("    WARN: complement %s: %v", svc.ComplementIPURL, err)
+			} else {
+				comp := computeComplement(excludeCIDRs)
+				cidrs = append(cidrs, comp...)
+				log.Printf("    complement of %s: %d CIDRs (from %d exclude ranges)",
+					filepath.Base(svc.ComplementIPURL), len(comp), len(excludeCIDRs))
+			}
+		}
+
 		// Deduplicate.
 		domains = dedup(domains)
+		excludeDomains = dedup(excludeDomains)
 		cidrs = dedup(cidrs)
 
-		log.Printf("  → %s: %d domains, %d CIDRs\n", svc.Name, len(domains), len(cidrs))
+		log.Printf("  → %s: %d domains, %d excludes, %d CIDRs\n", svc.Name, len(domains), len(excludeDomains), len(cidrs))
 		sets = append(sets, bundleSet{
-			Name:    svc.Name,
-			Domains: domains,
-			CIDRs:   cidrs,
+			Name:           svc.Name,
+			Domains:        domains,
+			ExcludeDomains: excludeDomains,
+			CIDRs:          cidrs,
 		})
 	}
 	return sets, nil
 }
 
-// parseV2flyDomains parses a v2fly domain-list-community data file.
-// Format: one domain per line, with optional prefixes (full:, regexp:, keyword:).
-// We only take bare entries (suffix match) and full: entries (exact match).
-// include: directives are ignored (handled by having multiple V2flyNames per service).
-func parseV2flyDomains(path string) ([]string, error) {
+// parseV2flyRecursive parses a v2fly domain-list-community data file,
+// recursively resolving include: directives.
+//
+// Entries with @{excludeAttr} are collected into the exclude list (not dropped).
+// This enables suffix exclusion: weibo.com is included, hk.weibo.com @!cn is excluded.
+// MatchDomain checks excludes first — if hk.weibo.com matches an exclude, it won't
+// match even though weibo.com suffix covers it.
+//
+// visited tracks already-parsed files to prevent infinite loops.
+func parseV2flyRecursive(dataDir, name, excludeAttr string, visited map[string]bool) (includes []string, excludes []string, err error) {
+	if visited[name] {
+		return nil, nil, nil
+	}
+	visited[name] = true
+
+	path := filepath.Join(dataDir, name)
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer f.Close()
 
-	var domains []string
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -161,29 +188,53 @@ func parseV2flyDomains(path string) ([]string, error) {
 		if idx := strings.Index(line, " #"); idx >= 0 {
 			line = strings.TrimSpace(line[:idx])
 		}
-		// Strip attributes (@cn, @ads, etc).
-		if idx := strings.Index(line, "@"); idx >= 0 {
+
+		// Check attributes before stripping them.
+		attrs := ""
+		if idx := strings.Index(line, " @"); idx >= 0 {
+			attrs = line[idx:]
 			line = strings.TrimSpace(line[:idx])
 		}
+
+		isExcluded := excludeAttr != "" && strings.Contains(attrs, "@"+excludeAttr)
 
 		// Handle prefixes.
 		switch {
 		case strings.HasPrefix(line, "include:"):
-			continue // skip includes
+			incName := strings.TrimPrefix(line, "include:")
+			if idx := strings.Index(incName, " "); idx >= 0 {
+				incName = incName[:idx]
+			}
+			incName = strings.TrimSpace(incName)
+			subInc, subExc, err := parseV2flyRecursive(dataDir, incName, excludeAttr, visited)
+			if err != nil {
+				log.Printf("      WARN: include %s: %v", incName, err)
+				continue
+			}
+			includes = append(includes, subInc...)
+			excludes = append(excludes, subExc...)
 		case strings.HasPrefix(line, "regexp:"):
-			continue // skip regexps (not supported in k2b)
+			continue
 		case strings.HasPrefix(line, "keyword:"):
-			continue // skip keywords (not supported in k2b)
+			continue
 		case strings.HasPrefix(line, "full:"):
-			// Exact match — we store as suffix too (same behavior).
-			domain := strings.TrimPrefix(line, "full:")
-			domains = append(domains, strings.TrimSpace(domain))
+			domain := strings.TrimSpace(strings.TrimPrefix(line, "full:"))
+			if isExcluded {
+				excludes = append(excludes, domain)
+			} else {
+				includes = append(includes, domain)
+			}
 		default:
-			// Bare entry = suffix match.
-			domains = append(domains, line)
+			if line != "" {
+				if isExcluded {
+					excludes = append(excludes, line)
+				} else {
+					includes = append(includes, line)
+				}
+			}
 		}
 	}
-	return domains, scanner.Err()
+	return includes, excludes, scanner.Err()
 }
 
 // fetchCIDRs fetches a URL returning one CIDR per line.
@@ -217,6 +268,129 @@ func fetchCIDRs(url string) ([]string, error) {
 	return cidrs, scanner.Err()
 }
 
+// computeComplement takes a list of CIDRs to exclude and returns all public
+// IP ranges NOT covered by them. Private/reserved ranges are also excluded.
+// Result: every public IP on the internet minus the exclude list.
+func computeComplement(excludeCIDRs []string) []string {
+	// Parse exclude ranges into v4 and v6 sets.
+	var v4Exclude, v6Exclude []netip.Prefix
+	for _, s := range excludeCIDRs {
+		p, err := netip.ParsePrefix(s)
+		if err != nil {
+			continue
+		}
+		p = p.Masked()
+		if p.Addr().Is4() {
+			v4Exclude = append(v4Exclude, p)
+		} else {
+			v6Exclude = append(v6Exclude, p)
+		}
+	}
+
+	// Private/reserved ranges to also exclude.
+	privateV4 := []string{
+		"0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8",
+		"169.254.0.0/16", "172.16.0.0/12", "192.0.0.0/24", "192.0.2.0/24",
+		"192.168.0.0/16", "198.18.0.0/15", "198.51.100.0/24",
+		"203.0.113.0/24", "224.0.0.0/4", "240.0.0.0/4",
+	}
+	privateV6 := []string{
+		"::1/128", "fc00::/7", "fe80::/10", "ff00::/8",
+		"::ffff:0:0/96",  // IPv4-mapped
+		"64:ff9b::/96",   // NAT64
+		"100::/64",       // discard
+		"2001:db8::/32",  // documentation
+	}
+	for _, s := range privateV4 {
+		p, _ := netip.ParsePrefix(s)
+		v4Exclude = append(v4Exclude, p.Masked())
+	}
+	for _, s := range privateV6 {
+		p, _ := netip.ParsePrefix(s)
+		v6Exclude = append(v6Exclude, p.Masked())
+	}
+
+	var result []string
+	result = append(result, subtractPrefixes(netip.MustParsePrefix("0.0.0.0/0"), v4Exclude)...)
+	result = append(result, subtractPrefixes(netip.MustParsePrefix("::/0"), v6Exclude)...)
+	return result
+}
+
+// subtractPrefixes computes universe minus all exclude prefixes.
+// Returns the remaining prefixes as CIDR strings.
+func subtractPrefixes(universe netip.Prefix, excludes []netip.Prefix) []string {
+	// Start with the full universe as a set of remaining prefixes.
+	remaining := []netip.Prefix{universe}
+
+	for _, excl := range excludes {
+		var next []netip.Prefix
+		for _, r := range remaining {
+			if !r.Overlaps(excl) {
+				next = append(next, r)
+				continue
+			}
+			// Subtract excl from r by splitting r into halves recursively.
+			next = append(next, subtractOne(r, excl)...)
+		}
+		remaining = next
+	}
+
+	result := make([]string, len(remaining))
+	for i, p := range remaining {
+		result[i] = p.String()
+	}
+	return result
+}
+
+// subtractOne removes excl from base, returning the remaining sub-prefixes.
+func subtractOne(base, excl netip.Prefix) []netip.Prefix {
+	// If excl fully covers base, nothing remains.
+	if excl.Bits() <= base.Bits() && excl.Contains(base.Addr()) {
+		return nil
+	}
+	// If base doesn't overlap excl, keep base.
+	if !base.Overlaps(excl) {
+		return []netip.Prefix{base}
+	}
+	// Split base into two halves and recurse.
+	if base.Bits() >= 32 && base.Addr().Is4() {
+		return nil // can't split further
+	}
+	if base.Bits() >= 128 && base.Addr().Is6() {
+		return nil // can't split further
+	}
+
+	left, right := splitPrefix(base)
+	var result []netip.Prefix
+	result = append(result, subtractOne(left, excl)...)
+	result = append(result, subtractOne(right, excl)...)
+	return result
+}
+
+// splitPrefix splits a prefix into its two child prefixes (one bit longer).
+func splitPrefix(p netip.Prefix) (netip.Prefix, netip.Prefix) {
+	bits := p.Bits() + 1
+	left := netip.PrefixFrom(p.Addr(), bits)
+
+	// Right half: set the new bit to 1.
+	addr := p.Addr()
+	var right netip.Prefix
+	if addr.Is4() {
+		raw := addr.As4()
+		byteIdx := (bits - 1) / 8
+		bitIdx := 7 - ((bits - 1) % 8)
+		raw[byteIdx] |= 1 << bitIdx
+		right = netip.PrefixFrom(netip.AddrFrom4(raw), bits)
+	} else {
+		raw := addr.As16()
+		byteIdx := (bits - 1) / 8
+		bitIdx := 7 - ((bits - 1) % 8)
+		raw[byteIdx] |= 1 << bitIdx
+		right = netip.PrefixFrom(netip.AddrFrom16(raw), bits)
+	}
+	return left, right
+}
+
 func dedup(ss []string) []string {
 	seen := make(map[string]bool, len(ss))
 	out := ss[:0]
@@ -235,26 +409,29 @@ func dedup(ss []string) []string {
 
 const (
 	k2bMagic      = "K2RB"
-	k2bVersion    = 1
+	k2bVersion    = 2
 	k2bHeaderSize = 32
-	k2bIndexSize  = 28
+	k2bIndexSize  = 36 // v2: +8 bytes for exclude domains
 )
 
 type bundleSet struct {
-	Name    string
-	Domains []string
-	CIDRs   []string
+	Name           string
+	Domains        []string
+	ExcludeDomains []string // domains to exclude from suffix matching
+	CIDRs          []string
 }
 
 func writeK2B(path string, sets []bundleSet) error {
 	type compiled struct {
-		name        []byte
-		domainData  []byte
-		domainCount int
-		ipv4Data    []byte
-		ipv4Count   int
-		ipv6Data    []byte
-		ipv6Count   int
+		name           []byte
+		domainData     []byte
+		domainCount    int
+		exclDomainData []byte
+		exclDomainCnt  int
+		ipv4Data       []byte
+		ipv4Count      int
+		ipv6Data       []byte
+		ipv6Count      int
 	}
 
 	built := make([]compiled, len(sets))
@@ -262,6 +439,8 @@ func writeK2B(path string, sets []bundleSet) error {
 		built[i].name = []byte(s.Name)
 		built[i].domainData = buildDomainData(s.Domains)
 		built[i].domainCount = len(s.Domains)
+		built[i].exclDomainData = buildDomainData(s.ExcludeDomains)
+		built[i].exclDomainCnt = len(s.ExcludeDomains)
 
 		v4, v4c := buildIPv4Data(s.CIDRs)
 		built[i].ipv4Data = v4
@@ -277,10 +456,11 @@ func writeK2B(path string, sets []bundleSet) error {
 	offset := dataStart
 
 	type idx struct {
-		nameOff, nameLen       uint32
-		domainOff, domainCount uint32
-		ipv4Off, ipv4Count     uint32
-		ipv6Off, ipv6Count     uint32
+		nameOff, nameLen             uint32
+		domainOff, domainCount       uint32
+		ipv4Off, ipv4Count           uint32
+		ipv6Off, ipv6Count           uint32
+		exclDomainOff, exclDomainCnt uint32
 	}
 	entries := make([]idx, len(sets))
 
@@ -304,6 +484,11 @@ func writeK2B(path string, sets []bundleSet) error {
 		entries[i].ipv6Count = uint32(built[i].ipv6Count)
 		offset += uint32(len(built[i].ipv6Data))
 	}
+	for i := range built {
+		entries[i].exclDomainOff = offset
+		entries[i].exclDomainCnt = uint32(built[i].exclDomainCnt)
+		offset += uint32(len(built[i].exclDomainData))
+	}
 
 	var buf bytes.Buffer
 
@@ -315,7 +500,7 @@ func writeK2B(path string, sets []bundleSet) error {
 	binary.LittleEndian.PutUint64(hdr[12:20], uint64(time.Now().Unix()))
 	buf.Write(hdr)
 
-	// Index.
+	// Index (36 bytes per set, v2).
 	for i := range entries {
 		ib := make([]byte, k2bIndexSize)
 		binary.LittleEndian.PutUint32(ib[0:4], entries[i].nameOff)
@@ -326,10 +511,12 @@ func writeK2B(path string, sets []bundleSet) error {
 		binary.LittleEndian.PutUint16(ib[20:22], uint16(entries[i].ipv4Count))
 		binary.LittleEndian.PutUint32(ib[22:26], entries[i].ipv6Off)
 		binary.LittleEndian.PutUint16(ib[26:28], uint16(entries[i].ipv6Count))
+		binary.LittleEndian.PutUint32(ib[28:32], entries[i].exclDomainOff)
+		binary.LittleEndian.PutUint32(ib[32:36], entries[i].exclDomainCnt)
 		buf.Write(ib)
 	}
 
-	// Data.
+	// Data sections.
 	for i := range built {
 		buf.Write(built[i].name)
 	}
@@ -341,6 +528,9 @@ func writeK2B(path string, sets []bundleSet) error {
 	}
 	for i := range built {
 		buf.Write(built[i].ipv6Data)
+	}
+	for i := range built {
+		buf.Write(built[i].exclDomainData)
 	}
 
 	totalSize := buf.Len()

@@ -2,8 +2,8 @@ name: Daily Build
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # UTC 00:00 daily
-  workflow_dispatch: {}   # manual trigger
+    - cron: '30 0 * * *'  # UTC 00:30 (30 min after upstream rebuilds)
+  workflow_dispatch: {}    # manual trigger
 
 permissions:
   contents: write
@@ -27,7 +27,32 @@ jobs:
       - name: Show output
         run: ls -lh dist/
 
+      - name: Check for changes
+        id: diff
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Download previous manifest (if any).
+          PREV_MANIFEST=$(mktemp)
+          if gh release download --pattern manifest.json -D "$(dirname "$PREV_MANIFEST")" -O "$PREV_MANIFEST" 2>/dev/null; then
+            # Compare SHA256 hashes only (ignore version/date fields).
+            OLD_HASHES=$(jq -S '.bundles | to_entries | map({key: .key, sha256: .value.sha256}) | sort_by(.key)' "$PREV_MANIFEST" 2>/dev/null || echo "[]")
+            NEW_HASHES=$(jq -S '.bundles | to_entries | map({key: .key, sha256: .value.sha256}) | sort_by(.key)' dist/manifest.json)
+            if [ "$OLD_HASHES" = "$NEW_HASHES" ]; then
+              echo "No changes in rule data — skipping release."
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "Rule data changed — creating release."
+              echo "changed=true" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "No previous release found — creating first release."
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+          rm -f "$PREV_MANIFEST"
+
       - name: Create release
+        if: steps.diff.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
