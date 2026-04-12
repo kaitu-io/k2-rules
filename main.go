@@ -833,7 +833,16 @@ func buildManifest(dir string) manifest {
 		Version: version,
 		Bundles: make(map[string]manifestBundle),
 	}
-	for _, name := range []string{"overseas.k2b", "cn-direct.k2b"} {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		log.Printf("warning: cannot read output dir for manifest: %v", err)
+		return m
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".k2b") {
+			continue
+		}
 		path := filepath.Join(dir, name)
 		data, err := os.ReadFile(path)
 		if err != nil {
