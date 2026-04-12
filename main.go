@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/csv"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"log"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -24,6 +26,7 @@ import (
 
 func main() {
 	outDir := flag.String("o", "dist", "output directory")
+	onlyCountry := flag.String("country", "", "build only this country code (for local testing, e.g. -country=ru)")
 	flag.Parse()
 
 	if err := os.MkdirAll(*outDir, 0755); err != nil {
@@ -37,27 +40,36 @@ func main() {
 	}
 	defer os.RemoveAll(v2flyDir)
 
-	// Build overseas bundle.
-	log.Println("=== building overseas.k2b ===")
-	overseasSets, err := buildSets(services, v2flyDir)
-	if err != nil {
-		log.Fatalf("build overseas: %v", err)
-	}
-	if err := writeK2B(filepath.Join(*outDir, "overseas.k2b"), overseasSets); err != nil {
-		log.Fatalf("write overseas.k2b: %v", err)
-	}
-
-	// Build cn-direct bundle.
-	log.Println("=== building cn-direct.k2b ===")
-	cnSets, err := buildSets(cnServices, v2flyDir)
-	if err != nil {
-		log.Fatalf("build cn-direct: %v", err)
-	}
-	if err := writeK2B(filepath.Join(*outDir, "cn-direct.k2b"), cnSets); err != nil {
-		log.Fatalf("write cn-direct.k2b: %v", err)
+	// Build overseas bundle (single-set "overseas" + non-CN IP complement).
+	// Skipped when -country is specified for faster local iteration.
+	if *onlyCountry == "" {
+		log.Println("=== building overseas.k2b ===")
+		overseasSets, err := buildSets(overseasServices, v2flyDir)
+		if err != nil {
+			log.Fatalf("build overseas: %v", err)
+		}
+		if err := writeK2B(filepath.Join(*outDir, "overseas.k2b"), overseasSets); err != nil {
+			log.Fatalf("write overseas.k2b: %v", err)
+		}
 	}
 
-	// Generate manifest.
+	// Build per-country bundles: {cc}-direct.k2b for each country in the table.
+	for _, c := range countries {
+		if *onlyCountry != "" && c.Code != *onlyCountry {
+			continue
+		}
+		bundleName := c.Code + "-direct.k2b"
+		log.Printf("=== building %s (%s) ===", bundleName, c.Name)
+		sets, err := buildSets(c.Services, v2flyDir)
+		if err != nil {
+			log.Fatalf("build %s: %v", bundleName, err)
+		}
+		if err := writeK2B(filepath.Join(*outDir, bundleName), sets); err != nil {
+			log.Fatalf("write %s: %v", bundleName, err)
+		}
+	}
+
+	// Generate manifest from whatever .k2b files are present in the output dir.
 	manifest := buildManifest(*outDir)
 	manifestData, _ := json.MarshalIndent(manifest, "", "  ")
 	if err := os.WriteFile(filepath.Join(*outDir, "manifest.json"), manifestData, 0644); err != nil {
@@ -104,6 +116,8 @@ func buildSets(svcs []service, v2flyDir string) ([]bundleSet, error) {
 		log.Printf("  %s: ", svc.Name)
 
 		var domains, excludeDomains []string
+
+		// v2fly domain-list-community data files.
 		for _, name := range svc.V2flyNames {
 			visited := make(map[string]bool)
 			inc, exc, err := parseV2flyRecursive(filepath.Join(v2flyDir, "data"), name, svc.ExcludeAttr, visited)
@@ -116,6 +130,35 @@ func buildSets(svcs []service, v2flyDir string) ([]bundleSet, error) {
 			log.Printf("    v2fly/%s: %d domains, %d excludes (%d files)", name, len(inc), len(exc), len(visited))
 		}
 
+		// Citizen Lab test-lists CSV — URL-format, one URL per row.
+		if svc.CitizenLabCSVURL != "" {
+			hosts, err := fetchCitizenLabCSV(svc.CitizenLabCSVURL)
+			if err != nil {
+				log.Printf("    WARN: citizenlab %s: %v", svc.CitizenLabCSVURL, err)
+			} else {
+				domains = append(domains, hosts...)
+				log.Printf("    citizenlab/%s: %d hosts", filepath.Base(svc.CitizenLabCSVURL), len(hosts))
+			}
+		}
+
+		// Plaintext domain lists (one FQDN per line).
+		for _, u := range svc.DomainListURLs {
+			doms, err := fetchDomainList(u)
+			if err != nil {
+				log.Printf("    WARN: domainlist %s: %v", u, err)
+				continue
+			}
+			domains = append(domains, doms...)
+			log.Printf("    domainlist/%s: %d domains", filepath.Base(u), len(doms))
+		}
+
+		// Hardcoded orphan domains.
+		if len(svc.OrphanDomains) > 0 {
+			domains = append(domains, svc.OrphanDomains...)
+			log.Printf("    orphans: %d domains", len(svc.OrphanDomains))
+		}
+
+		// IP CIDR sources.
 		var cidrs []string
 		for _, u := range svc.IPURLs {
 			c, err := fetchCIDRs(u)
@@ -154,6 +197,118 @@ func buildSets(svcs []service, v2flyDir string) ([]bundleSet, error) {
 		})
 	}
 	return sets, nil
+}
+
+// fetchCitizenLabCSV fetches a citizenlab/test-lists CSV and returns a deduped
+// list of hostnames. The CSV format has a header row and column 0 is a URL;
+// we parse each URL and extract its host component (lowercased, port stripped).
+//
+// Malformed rows are silently skipped. License: CC-BY-SA 4.0 — attribution
+// must be carried in ATTRIBUTIONS.md.
+func fetchCitizenLabCSV(u string) ([]string, error) {
+	resp, err := http.Get(u)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("status %d", resp.StatusCode)
+	}
+
+	r := csv.NewReader(resp.Body)
+	r.FieldsPerRecord = -1 // tolerate variable column counts
+	r.LazyQuotes = true
+
+	var hosts []string
+	seen := make(map[string]bool)
+	rowNum := 0
+	for {
+		row, err := r.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			// Skip the malformed row and continue.
+			continue
+		}
+		rowNum++
+		if rowNum == 1 {
+			continue // header
+		}
+		if len(row) == 0 {
+			continue
+		}
+		raw := strings.TrimSpace(row[0])
+		if raw == "" {
+			continue
+		}
+		host := extractHost(raw)
+		if host == "" || seen[host] {
+			continue
+		}
+		seen[host] = true
+		hosts = append(hosts, host)
+	}
+	return hosts, nil
+}
+
+// extractHost parses a URL (or bare hostname) and returns the normalized host:
+// scheme/path/query/fragment stripped, lowercased, port removed.
+// Returns "" for inputs that don't yield a valid DNS hostname.
+func extractHost(raw string) string {
+	// Accept bare hostnames without scheme by synthesizing one.
+	if !strings.Contains(raw, "://") {
+		raw = "http://" + raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "" {
+		return ""
+	}
+	// Reject IP literals — rule engine expects DNS suffixes, not IPs.
+	if _, err := netip.ParseAddr(host); err == nil {
+		return ""
+	}
+	// Reject obvious malformed hosts.
+	if strings.ContainsAny(host, " \t/") || !strings.Contains(host, ".") {
+		return ""
+	}
+	return host
+}
+
+// fetchDomainList fetches a plaintext domain list (one FQDN per line, # comments).
+// Used for sources like bootmortis/iran-hosted-domains.
+func fetchDomainList(u string) ([]string, error) {
+	resp, err := http.Get(u)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("status %d", resp.StatusCode)
+	}
+
+	var domains []string
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		// Strip inline comment.
+		if idx := strings.Index(line, " #"); idx >= 0 {
+			line = strings.TrimSpace(line[:idx])
+		}
+		host := extractHost(line)
+		if host != "" {
+			domains = append(domains, host)
+		}
+	}
+	return domains, scanner.Err()
 }
 
 // parseV2flyRecursive parses a v2fly domain-list-community data file,

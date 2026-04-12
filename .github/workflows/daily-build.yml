@@ -65,9 +65,11 @@ jobs:
           git push origin ":refs/tags/${TAG}" 2>/dev/null || true
 
           # Create new release.
+          # Upload every .k2b file in dist/ so the country fleet (overseas +
+          # cn/ir/ru/tr/pk/vn/mm/eg/id/sa/ae/th/bd/by) is published without
+          # having to enumerate each bundle here.
           gh release create "${TAG}" \
             --title "Rules ${VERSION}" \
             --notes "Auto-generated from upstream sources. See ATTRIBUTION.md." \
-            dist/overseas.k2b \
-            dist/cn-direct.k2b \
+            dist/*.k2b \
             dist/manifest.json
