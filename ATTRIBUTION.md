@@ -15,7 +15,7 @@ preserving attribution as required.
 - **citizenlab/test-lists** — CC-BY-SA 4.0
   - https://github.com/citizenlab/test-lists
   - Copyright (c) The Citizen Lab, University of Toronto
-  - Used for: the domain side of `ir/ru/tr/pk/vn/mm/eg/id/sa/ae/th/bd/by`
+  - Used for: the domain side of `ir/ru/tr/pk/vn/mm/eg/id/sa/ae/th/bd/by/tm/kz/uz`
     direct-bundles, and for `ir-blocked` / `ru-blocked` reserved sets.
   - **Attribution requirement**: derivative distributions (the `.k2b` bundles)
     must carry this attribution file. Consumers that redistribute rule bundles
@@ -34,8 +34,8 @@ preserving attribution as required.
   - Copyright (c) Loyalsoldier
   - Used for: `geoip-cn`, `geoip-ir`, `geoip-ru`, `geoip-tr`, `geoip-pk`,
     `geoip-vn`, `geoip-mm`, `geoip-eg`, `geoip-id`, `geoip-sa`, `geoip-ae`,
-    `geoip-th`, `geoip-bd`, `geoip-by`, and the "all non-CN IPs" complement
-    used in the `overseas` bundle.
+    `geoip-th`, `geoip-bd`, `geoip-by`, `geoip-tm`, `geoip-kz`, `geoip-uz`,
+    and the "all non-CN IPs" complement used in the `overseas` bundle.
   - IP-CIDR data used unmodified under CC-BY-SA 4.0 terms.
 
 - **runetfreedom/russia-blocked-geoip** — MIT License
@@ -45,6 +45,12 @@ preserving attribution as required.
     6 hours from the official source.
   - Used for: the IP side of `ru-blocked` (reserved for a future
     force-proxy privacy mode).
+
+- **runetfreedom/russia-blocked-geosite** — MIT License
+  - https://github.com/runetfreedom/russia-blocked-geosite
+  - Companion to russia-blocked-geoip: curated list of ~75k blocked domains
+    from the RKN registry. Auto-updated every 6 hours.
+  - Used for: the domain side of `ru-blocked`.
 
 ## Official Public IP Ranges
 

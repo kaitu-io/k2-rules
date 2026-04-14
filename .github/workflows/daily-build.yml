@@ -66,7 +66,7 @@ jobs:
 
           # Create new release.
           # Upload every .k2b file in dist/ so the country fleet (overseas +
-          # cn/ir/ru/tr/pk/vn/mm/eg/id/sa/ae/th/bd/by) is published without
+          # cn/ir/ru/tr/pk/vn/mm/eg/id/sa/ae/th/bd/by/tm/kz/uz) is published without
           # having to enumerate each bundle here.
           gh release create "${TAG}" \
             --title "Rules ${VERSION}" \

@@ -303,6 +303,13 @@ func fetchDomainList(u string) ([]string, error) {
 		if idx := strings.Index(line, " #"); idx >= 0 {
 			line = strings.TrimSpace(line[:idx])
 		}
+		// Strip v2ray-style prefixes (domain:, full:).
+		for _, prefix := range []string{"domain:", "full:"} {
+			if after, ok := strings.CutPrefix(line, prefix); ok {
+				line = strings.TrimSpace(after)
+				break
+			}
+		}
 		host := extractHost(line)
 		if host != "" {
 			domains = append(domains, host)

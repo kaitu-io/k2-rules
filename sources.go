@@ -164,6 +164,12 @@ var countries = []country{
 				// strongest data of any country: runetfreedom + RKN registry.
 				Name:             "ru-blocked",
 				CitizenLabCSVURL: "https://raw.githubusercontent.com/citizenlab/test-lists/master/lists/ru.csv",
+				DomainListURLs: []string{
+					// runetfreedom/russia-blocked-geosite: ~75k curated blocked domains
+					// from the RKN registry, updated every 6 hours. Uses domain: prefix
+					// format (stripped by fetchDomainList).
+					"https://github.com/runetfreedom/russia-blocked-geosite/releases/latest/download/ru-blocked.txt",
+				},
 				IPURLs: []string{
 					"https://raw.githubusercontent.com/runetfreedom/russia-blocked-geoip/release/text/ru-blocked.txt",
 				},
@@ -192,6 +198,7 @@ var countries = []country{
 				Name:             "mm-sites",
 				V2flyNames:       []string{"category-bank-mm"},
 				CitizenLabCSVURL: "https://raw.githubusercontent.com/citizenlab/test-lists/master/lists/mm.csv",
+				OrphanDomains:    []string{"mm"},
 			},
 		},
 	},
@@ -216,6 +223,16 @@ var countries = []country{
 
 	// Belarus
 	{Code: "by", Name: "Belarus", Services: citizenlabBasic("by")},
+
+	// Turkmenistan — world's 2nd most censored country with internet access
+	// (Freedom House 8/100). Single state ISP, VPN use criminalized.
+	{Code: "tm", Name: "Turkmenistan", Services: citizenlabBasic("tm")},
+
+	// Kazakhstan — DPI censorship, attempted state CA MITM in 2019/2020.
+	{Code: "kz", Name: "Kazakhstan", Services: citizenlabBasic("kz")},
+
+	// Uzbekistan — significant censorship of political/media content.
+	{Code: "uz", Name: "Uzbekistan", Services: citizenlabBasic("uz")},
 }
 
 // citizenlabBasic returns the default two-service recipe for a country with
@@ -230,6 +247,7 @@ func citizenlabBasic(cc string) []service {
 		{
 			Name:             cc + "-sites",
 			CitizenLabCSVURL: "https://raw.githubusercontent.com/citizenlab/test-lists/master/lists/" + cc + ".csv",
+			OrphanDomains:    []string{cc}, // ccTLD suffix → all .{cc} domains go direct
 		},
 	}
 }
