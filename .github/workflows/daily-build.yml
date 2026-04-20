@@ -27,6 +27,14 @@ jobs:
       - name: Show output
         run: ls -lh dist/
 
+      - name: Build tarball + VERSION
+        run: |
+          cd dist
+          tar -czf k2-rules.tar.gz *.k2b
+          ls -lh k2-rules.tar.gz
+          printf '%s sha256:%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(sha256sum k2-rules.tar.gz | awk '{print $1}')" > VERSION
+          cat VERSION
+
       - name: Check for changes
         id: diff
         env:
@@ -72,4 +80,35 @@ jobs:
             --title "Rules ${VERSION}" \
             --notes "Auto-generated from upstream sources. See ATTRIBUTION.md." \
             dist/*.k2b \
-            dist/manifest.json
+            dist/manifest.json \
+            dist/k2-rules.tar.gz \
+            dist/VERSION
+
+      - name: Sync release branch
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Stash the freshly-built artifacts
+          mkdir -p /tmp/release-artifacts
+          cp dist/*.k2b dist/k2-rules.tar.gz dist/VERSION /tmp/release-artifacts/
+
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+
+          # Fetch + check out release branch (it was created by manual bootstrap).
+          git fetch origin release
+          git checkout release
+
+          # Replace all contents with the freshly-built artifact set.
+          # The release branch only contains .k2b + tarball + VERSION; no source.
+          git rm -rf . 2>/dev/null || true
+          cp /tmp/release-artifacts/* .
+
+          git add .
+          if git diff --cached --quiet; then
+            echo "no changes to release branch"
+            exit 0
+          fi
+          git commit -m "nightly: $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push origin release
