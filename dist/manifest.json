@@ -1,0 +1,95 @@
+{
+  "version": "2026-05-01",
+  "bundles": {
+    "ae-direct": {
+      "version": "2026-05-01",
+      "sha256": "1e2aa4b8a14fcdf658bb79d68c6c5c7050fbbc2de3c9f411a17e702d2a3621cb",
+      "size": 118674
+    },
+    "bd-direct": {
+      "version": "2026-05-01",
+      "sha256": "f216ad89020401de3540d16f690ea6026182f073e33dfe8719b5e09283f6aa41",
+      "size": 98294
+    },
+    "by-direct": {
+      "version": "2026-05-01",
+      "sha256": "94e00bd78dae71c7f2deb37cc47f6d673659305fe2909a4a12d4045968c31652",
+      "size": 22734
+    },
+    "cn-direct": {
+      "version": "2026-05-01",
+      "sha256": "0228ec000d973fed8a937a105912560378c1638f24a6813d8c58fcc51c3f659e",
+      "size": 243141
+    },
+    "eg-direct": {
+      "version": "2026-05-01",
+      "sha256": "042bc14727ef1973455254d42f9ac753230d39b038b23be824ef6e9c73d4b090",
+      "size": 30766
+    },
+    "id-direct": {
+      "version": "2026-05-01",
+      "sha256": "51d1cfa4a0af73882f39ea6e2b839c3ee7aa655063d50634e1a8768b7bf30925",
+      "size": 219186
+    },
+    "ir-direct": {
+      "version": "2026-05-01",
+      "sha256": "dc4766dad68eead1c7758023e89b20cd579d4816042c3d9a9807fe437a76a9ef",
+      "size": 2442171
+    },
+    "kz-direct": {
+      "version": "2026-05-01",
+      "sha256": "aa3ab58265949fb06cd44481aff5c12f4dcad38b95053295fefd85fa5fb88d6f",
+      "size": 50101
+    },
+    "mm-direct": {
+      "version": "2026-05-01",
+      "sha256": "d8a03afaa65985480610070fd78224f9fa895c0861bb2a5b93e8f8164acf9d87",
+      "size": 36113
+    },
+    "overseas": {
+      "version": "2026-05-01",
+      "sha256": "b234f6c864a59019cc25cc888d84a13a9d429f99d899a20c172836d708b30ffc",
+      "size": 867684
+    },
+    "pk-direct": {
+      "version": "2026-05-01",
+      "sha256": "b03642187d59e32f54fec2c9a36090f58d41427ee025a143589f84b58b5d63ba",
+      "size": 44396
+    },
+    "ru-direct": {
+      "version": "2026-05-01",
+      "sha256": "68abead8f6ed5e6f887f454803d5cd519909affb830f927ad885e086b1b0435b",
+      "size": 2752815
+    },
+    "sa-direct": {
+      "version": "2026-05-01",
+      "sha256": "7bd916d1c9b777192f64f5db75531962c89964231c2af3c4d39de1c4ded7b0f3",
+      "size": 82118
+    },
+    "th-direct": {
+      "version": "2026-05-01",
+      "sha256": "10597e5158f8e5ed87c2c2d148f133d863900b3b3c3cc267dbb992ecc9a27148",
+      "size": 71140
+    },
+    "tm-direct": {
+      "version": "2026-05-01",
+      "sha256": "4206fedec6c770666de32ac41766e25e6ef1c3814b03169df9978ef2f0deda13",
+      "size": 10255
+    },
+    "tr-direct": {
+      "version": "2026-05-01",
+      "sha256": "a14c263ad7eff7950d859996a388426741b3ecd8679885576c60fa09f34be93c",
+      "size": 116368
+    },
+    "uz-direct": {
+      "version": "2026-05-01",
+      "sha256": "168463b1f4062938563d9a90f4e7e9a9b13c0251f11ad012922602aa4f71f39c",
+      "size": 17335
+    },
+    "vn-direct": {
+      "version": "2026-05-01",
+      "sha256": "17ecd45491fe6edee4adaa37a7e8e219ff7c9f6695c6f862f56852c427cc851c",
+      "size": 75494
+    }
+  }
+}
