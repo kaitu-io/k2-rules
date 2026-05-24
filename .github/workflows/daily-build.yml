@@ -112,3 +112,19 @@ jobs:
           fi
           git commit -m "nightly: $(date -u +%Y-%m-%dT%H:%MZ)"
           git push origin release
+
+      - name: Purge jsdelivr CDN cache
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          # jsdelivr caches @release branch artifacts for up to 12h (s-maxage=43200).
+          # A GET to purge.jsdelivr.net flushes the file across all jsdelivr edges
+          # so the four POPs (cdn / fastly / testingcf / gcore) revalidate against
+          # GitHub on next client fetch. Free public service, no auth required.
+          base="https://purge.jsdelivr.net/gh/kaitu-io/k2-rules@release"
+          paths=(k2-rules.tar.gz VERSION manifest.json)
+          for f in dist/*.k2b; do paths+=("$(basename "$f")"); done
+          for p in "${paths[@]}"; do
+            echo "purge: $p"
+            # 5s connect / 15s total — purge endpoint is best-effort, never fail the build
+            curl -sS --max-time 15 --connect-timeout 5 -o /dev/null -w '  %{http_code}\n' "${base}/${p}" || echo "  (purge failed, non-fatal)"
+          done
