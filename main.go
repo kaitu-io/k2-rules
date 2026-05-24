@@ -6,6 +6,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/csv"
@@ -168,6 +169,25 @@ func buildSets(svcs []service, v2flyDir string) ([]bundleSet, error) {
 			}
 			cidrs = append(cidrs, c...)
 			log.Printf("    %s: %d CIDRs", filepath.Base(u), len(c))
+		}
+
+		// Pre-resolve HTTPDNS anchor domains and emit their PoP IPs as /32 CIDRs.
+		// See preresolve.go for the cascade rationale.
+		if svc.PreResolveV2flyCategory != "" {
+			visited := make(map[string]bool)
+			doms, _, err := parseV2flyRecursive(filepath.Join(v2flyDir, "data"), svc.PreResolveV2flyCategory, "", visited)
+			if err != nil {
+				log.Printf("    WARN: preresolve v2fly/%s: %v", svc.PreResolveV2flyCategory, err)
+			} else if len(doms) == 0 {
+				log.Printf("    WARN: preresolve v2fly/%s: empty domain list", svc.PreResolveV2flyCategory)
+			} else {
+				log.Printf("    preresolve v2fly/%s: %d domains, querying...", svc.PreResolveV2flyCategory, len(doms))
+				cfg := defaultPreResolveConfig()
+				bctx, cancel := context.WithTimeout(context.Background(), cfg.BatchTimeout)
+				resolved := preResolveDomains(bctx, doms, cfg)
+				cancel()
+				cidrs = append(cidrs, resolved...)
+			}
 		}
 
 		// Compute complement if configured (e.g. "all non-Chinese IPs").

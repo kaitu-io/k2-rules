@@ -38,6 +38,16 @@ type service struct {
 	// OrphanDomains are hardcoded domain suffixes to add to this set.
 	// Use sparingly — for critical domestic services that upstream data misses.
 	OrphanDomains []string
+
+	// PreResolveV2flyCategory names a v2fly data file whose domain entries are
+	// resolved at build time and the resulting IPs added to this service's
+	// CIDR set as /32 (IPv4) / /128 (IPv6). Used for HTTPDNS server anchors
+	// whose IPs cannot be reliably pinned at runtime (e.g., apps that connect
+	// to HTTPDNS by hardcoded IP without going through sys DNS).
+	//
+	// Resolution uses multi-resolver UNION with EDNS0 Client Subnet from
+	// multiple geographic perspectives — see preresolve.go.
+	PreResolveV2flyCategory string
 }
 
 // country groups the services that compose a single {cc}-direct.k2b bundle.
@@ -86,6 +96,17 @@ var countries = []country{
 			{
 				Name:   "geoip-cn",
 				IPURLs: []string{"https://raw.githubusercontent.com/Loyalsoldier/geoip/release/text/cn.txt"},
+			},
+			{
+				// HTTPDNS server anchors: build-time multi-resolver UNION resolves
+				// the v2fly category-httpdns-cn list and pins all observed PoP IPs
+				// (mainland + overseas) as direct. Necessary because some apps
+				// (e.g. WeChat) connect to HTTPDNS via hardcoded IPs and bypass
+				// sys DNS, so runtime tmp-rule pinning misses them. The HTTPDNS
+				// server, when reached directly, sees the real CN source and
+				// returns mainland-PoP business IPs that cn.txt already covers.
+				Name:                    "cn-httpdns-anchors",
+				PreResolveV2flyCategory: "category-httpdns-cn",
 			},
 			{
 				Name: "cn-sites",
