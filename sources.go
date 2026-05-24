@@ -94,18 +94,38 @@ var countries = []country{
 		Code: "cn", Name: "China",
 		Services: []service{
 			{
-				Name:   "geoip-cn",
-				IPURLs: []string{"https://raw.githubusercontent.com/Loyalsoldier/geoip/release/text/cn.txt"},
-			},
-			{
-				// HTTPDNS server anchors: build-time multi-resolver UNION resolves
-				// the v2fly category-httpdns-cn list and pins all observed PoP IPs
-				// (mainland + overseas) as direct. Necessary because some apps
-				// (e.g. WeChat) connect to HTTPDNS via hardcoded IPs and bypass
-				// sys DNS, so runtime tmp-rule pinning misses them. The HTTPDNS
-				// server, when reached directly, sees the real CN source and
-				// returns mainland-PoP business IPs that cn.txt already covers.
-				Name:                    "cn-httpdns-anchors",
+				// "geoip-cn" — the canonical IP layer of the CN bundle. Despite the
+				// name, this set actually carries TWO logically distinct groups of
+				// IPs, merged into a single set so they ship together to every
+				// existing k2 client without requiring a binary release to update
+				// the cn-access preset map:
+				//
+				//   1. Loyalsoldier cn.txt — mainland China geographic allocation.
+				//      The traditional "geoip-cn" data; what users expect from the
+				//      name. ~5,600 CIDRs, daily refresh from upstream.
+				//
+				//   2. HTTPDNS server anchor IPs — build-time multi-resolver UNION
+				//      of v2fly category-httpdns-cn. These are the PoP IPs (often
+				//      Tencent HK / overseas, e.g. 43.129.138.0/24) at which
+				//      mainland HTTPDNS services answer. Pinning them as direct
+				//      breaks the cascade that causes apps like WeChat — which
+				//      sometimes connect to HTTPDNS via hardcoded IPs and bypass
+				//      sys DNS — to route AU→CN→HK for what should be a local
+				//      connection. With these IPs direct, the HTTPDNS server sees
+				//      the real CN source and returns mainland-PoP business IPs
+				//      that cn.txt already covers (the cascade self-corrects).
+				//
+				// Why one set, not two: the cn-access preset on existing client
+				// binaries expands to [cn-sites, geoip-cn]. If anchor IPs lived in
+				// a separate set, no current binary would reference it and the
+				// fix would only ship with the next k2 release. Merging into
+				// geoip-cn makes every k2 client pick it up on the next daily
+				// bundle refresh, with zero client-side change. The blended
+				// semantics (HK Tencent PoPs in "geoip-cn") are accepted here
+				// in exchange for the deployment-velocity win — see the doc
+				// comment in preresolve.go for the full cascade rationale.
+				Name:                    "geoip-cn",
+				IPURLs:                  []string{"https://raw.githubusercontent.com/Loyalsoldier/geoip/release/text/cn.txt"},
 				PreResolveV2flyCategory: "category-httpdns-cn",
 			},
 			{
