@@ -70,7 +70,17 @@ func main() {
 		}
 	}
 
-	// Generate manifest from whatever .k2b files are present in the output dir.
+	// Copy app-bypass YAML presets from app-bypass/<region>.yaml into the
+	// output dir as app-bypass-<region>.yaml so they ride the same CDN +
+	// tarball + jsdelivr path as the .k2b bundles. The k2 engine's
+	// appbypass.Load expects the "app-bypass-" prefix; the source repo
+	// uses the cleaner app-bypass/{cc}.yaml layout, so we rename on copy.
+	if err := publishAppBypassPresets("app-bypass", *outDir); err != nil {
+		log.Fatalf("publish app-bypass: %v", err)
+	}
+
+	// Generate manifest from whatever .k2b + app-bypass-*.yaml files are
+	// present in the output dir.
 	manifest := buildManifest(*outDir)
 	manifestData, _ := json.MarshalIndent(manifest, "", "  ")
 	if err := os.WriteFile(filepath.Join(*outDir, "manifest.json"), manifestData, 0644); err != nil {
@@ -79,6 +89,41 @@ func main() {
 
 	log.Println("=== done ===")
 	log.Printf("output: %s\n", *outDir)
+}
+
+// publishAppBypassPresets copies app-bypass/<region>.yaml → outDir/app-bypass-<region>.yaml.
+// Missing srcDir is non-fatal (the build still ships .k2b bundles). Only
+// *.yaml files at the top level of srcDir are copied; subdirectories and
+// docs (README.md etc.) are skipped.
+func publishAppBypassPresets(srcDir, outDir string) error {
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			log.Printf("app-bypass: %s missing, skipping", srcDir)
+			return nil
+		}
+		return err
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".yaml") {
+			continue
+		}
+		region := strings.TrimSuffix(name, ".yaml")
+		if region == "" {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(srcDir, name))
+		if err != nil {
+			return fmt.Errorf("read %s: %w", name, err)
+		}
+		dst := filepath.Join(outDir, "app-bypass-"+region+".yaml")
+		if err := os.WriteFile(dst, data, 0644); err != nil {
+			return fmt.Errorf("write %s: %w", dst, err)
+		}
+		log.Printf("app-bypass: published %s -> %s (%d bytes)", name, filepath.Base(dst), len(data))
+	}
+	return nil
 }
 
 // cloneV2fly does a shallow clone of v2fly/domain-list-community.
@@ -867,7 +912,17 @@ func buildManifest(dir string) manifest {
 	}
 	for _, entry := range entries {
 		name := entry.Name()
-		if !strings.HasSuffix(name, ".k2b") {
+		// .k2b bundle: key = basename without suffix (e.g. "overseas",
+		// "cn-direct"). app-bypass-<region>.yaml: key = full filename
+		// (e.g. "app-bypass-cn.yaml") so the engine's appbypass.Load can
+		// match by glob without a separate index.
+		var key string
+		switch {
+		case strings.HasSuffix(name, ".k2b"):
+			key = strings.TrimSuffix(name, ".k2b")
+		case strings.HasPrefix(name, "app-bypass-") && strings.HasSuffix(name, ".yaml"):
+			key = name
+		default:
 			continue
 		}
 		path := filepath.Join(dir, name)
@@ -876,7 +931,6 @@ func buildManifest(dir string) manifest {
 			continue
 		}
 		h := sha256.Sum256(data)
-		key := strings.TrimSuffix(name, ".k2b")
 		m.Bundles[key] = manifestBundle{
 			Version: version,
 			SHA256:  fmt.Sprintf("%x", h),

@@ -18,6 +18,9 @@ jobs:
         with:
           go-version: '1.25'
 
+      - name: Lint app-bypass YAML presets
+        run: go run ./tools/validate-app-bypass app-bypass
+
       - name: Build compiler
         run: go build -o k2-rules-gen .
 
@@ -29,8 +32,11 @@ jobs:
 
       - name: Build tarball + VERSION
         run: |
+          # Bundle .k2b + app-bypass-*.yaml so the client downloads both
+          # in one shot. app-bypass-*.yaml lives next to .k2b in the
+          # engine's runtime cache.
           cd dist
-          tar -czf k2-rules.tar.gz *.k2b
+          tar -czf k2-rules.tar.gz *.k2b app-bypass-*.yaml
           ls -lh k2-rules.tar.gz
           printf '%s sha256:%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(sha256sum k2-rules.tar.gz | awk '{print $1}')" > VERSION
           cat VERSION
@@ -80,6 +86,7 @@ jobs:
             --title "Rules ${VERSION}" \
             --notes "Auto-generated from upstream sources. See ATTRIBUTION.md." \
             dist/*.k2b \
+            dist/app-bypass-*.yaml \
             dist/manifest.json \
             dist/k2-rules.tar.gz \
             dist/VERSION
@@ -92,6 +99,8 @@ jobs:
           # Stash the freshly-built artifacts
           mkdir -p /tmp/release-artifacts
           cp dist/*.k2b dist/k2-rules.tar.gz dist/VERSION /tmp/release-artifacts/
+          # Include app-bypass YAML presets when present (no-op if dir empty).
+          cp dist/app-bypass-*.yaml /tmp/release-artifacts/ 2>/dev/null || true
 
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
@@ -123,6 +132,10 @@ jobs:
           base="https://purge.jsdelivr.net/gh/kaitu-io/k2-rules@release"
           paths=(k2-rules.tar.gz VERSION manifest.json)
           for f in dist/*.k2b; do paths+=("$(basename "$f")"); done
+          for f in dist/app-bypass-*.yaml; do
+            [ -e "$f" ] || continue
+            paths+=("$(basename "$f")")
+          done
           for p in "${paths[@]}"; do
             echo "purge: $p"
             # 5s connect / 15s total — purge endpoint is best-effort, never fail the build
