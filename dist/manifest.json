@@ -1,0 +1,100 @@
+{
+  "version": "2026-05-26",
+  "bundles": {
+    "ae-direct": {
+      "version": "2026-05-26",
+      "sha256": "b27f5b86c4480c7631350071a27690df391e6196a4addc3ef08d7ea3f5e115d8",
+      "size": 118138
+    },
+    "app-bypass-cn.yaml": {
+      "version": "2026-05-26",
+      "sha256": "7385d00dd08dd332af0fca493660c9889bfefbfb33b5d2890a021b77a7e9f4ef",
+      "size": 3272
+    },
+    "bd-direct": {
+      "version": "2026-05-26",
+      "sha256": "ff023f068c5debc0bce81ed635b932520de87664b0bb097fddee5e31b807b0f5",
+      "size": 93206
+    },
+    "by-direct": {
+      "version": "2026-05-26",
+      "sha256": "e9536eb28c115cdb873ff7a5205598ccbe2d768a925a1a07118665267c14f717",
+      "size": 22262
+    },
+    "cn-direct": {
+      "version": "2026-05-26",
+      "sha256": "9029e823a443b8c3df956c6948a291b9d08809d484c581f98eebb1e436468a8b",
+      "size": 223984
+    },
+    "eg-direct": {
+      "version": "2026-05-26",
+      "sha256": "ea4a489ce5da8d09680cb3446d952dbd958264b2de3ce936e0efaae679961502",
+      "size": 29990
+    },
+    "id-direct": {
+      "version": "2026-05-26",
+      "sha256": "4c9fde0f241df317173e3c889f02a0a558c2c59cb7ffe6ae8ea58093fd6ff04d",
+      "size": 219386
+    },
+    "ir-direct": {
+      "version": "2026-05-26",
+      "sha256": "3717976031cedd940096738c522dd352645b0a8471e1b39ea2811606f9c05464",
+      "size": 2441200
+    },
+    "kz-direct": {
+      "version": "2026-05-26",
+      "sha256": "ffc6568e33372243774c1a3828e42e16d81ea8bc43f5beb164bc69fe3e055538",
+      "size": 49525
+    },
+    "mm-direct": {
+      "version": "2026-05-26",
+      "sha256": "6ca3ef242f923a8a126633b58941041e6bd60120f75a02c33e291a3239506796",
+      "size": 35521
+    },
+    "overseas": {
+      "version": "2026-05-26",
+      "sha256": "085fadd717698507eed0357b836307dd325befd9ff319029b6cc1fe44951ac60",
+      "size": 835001
+    },
+    "pk-direct": {
+      "version": "2026-05-26",
+      "sha256": "17e7f103f4d98b2f025c8b08628f61b04910554d1f9dd7b85018086a12af668b",
+      "size": 80644
+    },
+    "ru-direct": {
+      "version": "2026-05-26",
+      "sha256": "2e5b5a0a01f8764aad5857406b9cb6bc715a7a207a72edde92ca659a6ceaa20c",
+      "size": 2756375
+    },
+    "sa-direct": {
+      "version": "2026-05-26",
+      "sha256": "dfee73172338421a123368cbab64399dd77e5d567b13a2429df67a6654996755",
+      "size": 81486
+    },
+    "th-direct": {
+      "version": "2026-05-26",
+      "sha256": "70dbb25d0c01b661e44f7c21d8bcf1a9455d201a144e5469aac492ff0837f157",
+      "size": 71284
+    },
+    "tm-direct": {
+      "version": "2026-05-26",
+      "sha256": "aee416121a9a72985b5b13a73c47ee7d8c045cc80f259053d0aa8ec5a98af5a0",
+      "size": 9839
+    },
+    "tr-direct": {
+      "version": "2026-05-26",
+      "sha256": "46b26fdc7e30f611d044a9ef23dacad97180ddc9c07d1417e62c80634af23613",
+      "size": 115288
+    },
+    "uz-direct": {
+      "version": "2026-05-26",
+      "sha256": "a371be2be7e1f2feb4772c079e09606f4418f39ea2d9c5cda700f378dbca068e",
+      "size": 16767
+    },
+    "vn-direct": {
+      "version": "2026-05-26",
+      "sha256": "5721a5eb9c2b76c71fa2317f1c6ed9fa7493588e53a04b6679c5026242bc8262",
+      "size": 76686
+    }
+  }
+}

@@ -81,9 +81,9 @@ android:
     # E-commerce
     - com.jingdong.
     - com.jd.
-    # Banking
+    # Banking — keep prefixes anchored to com.* to avoid catching foreign
+    # apps with bank-like short prefixes (e.g. "cmb.foo" non-Chinese apps).
     - com.cmbchina.
-    - cmb.
     - com.icbc.
     - com.ICBC.
     - com.ccb.
