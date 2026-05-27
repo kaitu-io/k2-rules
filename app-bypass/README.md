@@ -33,6 +33,27 @@ darwin:
     - "WeChatHelper*"              # prefix glob
 ```
 
+## Matching semantics
+
+The `installers` / `apps` lists are an **inclusion claim**: "these apps belong to this region." A runtime match means the k2 client treats the app as region-specific traffic and routes it through the region's tunnel — it is **not** an exclusion list.
+
+Reading direction:
+- `windows.apps: ["WeChat*"]` in `cn.yaml` means "WeChat is China-region traffic" → client routes it via the China tunnel.
+- It does **not** mean "WeChat bypasses the VPN." Bypass vs. route is the consuming policy's decision; this file only says *which apps belong to which region*.
+
+Match dimensions:
+
+| Field | What triggers a hit | Example use case |
+|---|---|---|
+| `android.installers` | App was installed *via* this package source | "Anything installed via Xiaomi Market is China-region" |
+| `android.apps` | App's package name matches the glob | "All `com.tencent.*` is China-region" |
+| `windows.apps` | Running process basename matches the glob (case-insensitive) | "`WeChat.exe`, `WeChatHelper.exe` are China-region" |
+| `darwin.apps` | Running process basename matches the glob (case-sensitive) | "`WeChat`, `WeChatHelper` are China-region" |
+
+Match precedence on Android: `installers` > `apps`. An app hit by both is reported once with `HitKind=installer` — installer evidence is more durable than a package-name glob (rebrandings don't break it).
+
+Empty lists are not match-all. A region with no `windows.apps` matches **no** Windows apps; absence means "no Windows claim." There is no `apps: ["*"]` shortcut — the validator rejects a bare `*` to catch accidental wildcards.
+
 ## Glob semantics
 
 Single `*` matches **zero or more arbitrary characters**. No `?`, `[...]`, brace expansion, or path-segment semantics.
