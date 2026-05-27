@@ -183,12 +183,14 @@ func lintExactNoGlob(s string) error {
 	return nil
 }
 
-// lintGlob: app patterns support single-* glob. Empty/all-`*` patterns are
-// already rejected upstream (empty → trimmed empty; "*" alone matches
-// everything which is almost certainly a maintainer error).
+// lintGlob: app patterns support single-* glob. Any all-`*` pattern (`*`,
+// `**`, `***`, …) collapses to "match everything" under the runtime glob
+// (`**` splits to three empty parts, prefix/suffix anchor as empty, no
+// middle segments to check — true for every input). Reject every form,
+// not just the bare single-* form the earlier guard caught.
 func lintGlob(s string) error {
-	if s == "*" {
-		return errors.New("pattern '*' matches everything — reject as accidental wildcard")
+	if strings.Trim(s, "*") == "" {
+		return errors.New("pattern of only '*' chars matches everything — reject as accidental wildcard")
 	}
 	if strings.ContainsAny(s, " \t") {
 		return errors.New("contains whitespace")

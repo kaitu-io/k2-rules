@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 )
@@ -35,6 +36,13 @@ func encodeStringList(items []string) []byte {
 }
 
 // normalizeStrings trims, optionally lowercases, dedups, and sorts.
+//
+// Also drops all-`*` patterns (`*`, `**`, `***`, …) as defense in depth
+// against a validator miss: matchGlob treats any such pattern as "match
+// every input", which would route every installed app direct. The
+// authoritative reject lives in tools/validate-app-bypass; this is the
+// safety net for when bad YAML slips past CI (force-merge, validator
+// regression, etc.).
 func normalizeStrings(in []string, lower bool) []string {
 	seen := make(map[string]struct{}, len(in))
 	out := make([]string, 0, len(in))
@@ -45,6 +53,11 @@ func normalizeStrings(in []string, lower bool) []string {
 		}
 		if lower {
 			s = strings.ToLower(s)
+		}
+		if strings.Trim(s, "*") == "" {
+			slog.Warn("krs: dropping all-* app pattern (validator should have caught this)",
+				"pattern", s)
+			continue
 		}
 		if _, dup := seen[s]; dup {
 			continue

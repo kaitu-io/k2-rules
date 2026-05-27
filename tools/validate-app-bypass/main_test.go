@@ -122,6 +122,27 @@ android:
 	}
 }
 
+// All-star patterns (*, **, ***, …) collapse to "match everything" under
+// matchGlob and would route every installed app direct — the canonical
+// accidental-wildcard attack vector. The validator must reject every form,
+// not just the bare single-* it originally guarded against.
+func TestValidate_V2_RejectsAllStarPatterns(t *testing.T) {
+	for _, pat := range []string{"*", "**", "***", "*****"} {
+		dir := t.TempDir()
+		path := writeYAML(t, dir, "cn.yaml", `
+version: 2
+region: cn
+android:
+  apps:
+    - "`+pat+`"
+`)
+		errs := validateFile(path)
+		if !hasErr(errs, "wildcard") && !hasErr(errs, "*") {
+			t.Errorf("pattern %q: expected wildcard rejection, got: %v", pat, errs)
+		}
+	}
+}
+
 func TestValidate_V2_UnknownFieldsRejected(t *testing.T) {
 	dir := t.TempDir()
 	path := writeYAML(t, dir, "cn.yaml", `

@@ -81,6 +81,29 @@ func TestReadBundle_OmitsEmptyPlatforms(t *testing.T) {
 	}
 }
 
+// Defense in depth: even if the validator misses an all-* pattern (e.g. PR
+// force-merged past CI), the writer must silently drop it before the bytes
+// hit the bundle. Otherwise one bad YAML entry would route every installed
+// app direct, defeating the VPN entirely.
+func TestWriteBundle_DropsAllStarAppPatterns(t *testing.T) {
+	in := &krs.Bundle{Apps: &krs.AppPatterns{
+		Android: krs.AndroidPatterns{Apps: []string{"**", "com.legit.*", "***"}},
+		Windows: krs.WindowsPatterns{Apps: []string{"*", "wechat*"}},
+		Darwin:  krs.DarwinPatterns{Apps: []string{"*****", "WeChat*"}},
+	}}
+	var buf bytes.Buffer
+	if err := krs.WriteBundle(&buf, in); err != nil {
+		t.Fatalf("WriteBundle: %v", err)
+	}
+	got, err := krs.ReadBundle(buf.Bytes())
+	if err != nil {
+		t.Fatalf("ReadBundle: %v", err)
+	}
+	checkSlice(t, "Android.Apps", got.Apps.Android.Apps, []string{"com.legit.*"})
+	checkSlice(t, "Windows.Apps", got.Apps.Windows.Apps, []string{"wechat*"})
+	checkSlice(t, "Darwin.Apps", got.Apps.Darwin.Apps, []string{"WeChat*"})
+}
+
 func checkSlice(t *testing.T, name string, got, want []string) {
 	t.Helper()
 	if len(got) != len(want) {
