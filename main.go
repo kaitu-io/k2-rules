@@ -44,7 +44,7 @@ func main() {
 	// Build overseas bundle (single-set "overseas" + non-CN IP complement).
 	// Skipped when -country is specified for faster local iteration.
 	if *onlyCountry == "" {
-		log.Println("=== building overseas.k2b ===")
+		log.Println("=== building overseas.k2b + overseas.krs ===")
 		overseasSets, err := buildSets(overseasServices, v2flyDir)
 		if err != nil {
 			log.Fatalf("build overseas: %v", err)
@@ -52,31 +52,42 @@ func main() {
 		if err := writeK2B(filepath.Join(*outDir, "overseas.k2b"), overseasSets); err != nil {
 			log.Fatalf("write overseas.k2b: %v", err)
 		}
+		// overseas has no region-specific app patterns.
+		if err := writeKRSBundle(filepath.Join(*outDir, "overseas.krs"), overseasSets, nil); err != nil {
+			log.Fatalf("write overseas.krs: %v", err)
+		}
 	}
 
-	// Build per-country bundles: {cc}-direct.k2b for each country in the table.
+	// Build per-country bundles. Each country gets:
+	//   <cc>-direct.k2b  — legacy routing-only bundle
+	//   <cc>.krs         — unified routing + app patterns (current format)
+	// .krs ships alongside .k2b during the ~6 month transition window.
 	for _, c := range countries {
 		if *onlyCountry != "" && c.Code != *onlyCountry {
 			continue
 		}
-		bundleName := c.Code + "-direct.k2b"
-		log.Printf("=== building %s (%s) ===", bundleName, c.Name)
+		log.Printf("=== building %s-direct.k2b + %s.krs (%s) ===", c.Code, c.Code, c.Name)
 		sets, err := buildSets(c.Services, v2flyDir)
 		if err != nil {
-			log.Fatalf("build %s: %v", bundleName, err)
+			log.Fatalf("build %s: %v", c.Code, err)
 		}
-		if err := writeK2B(filepath.Join(*outDir, bundleName), sets); err != nil {
-			log.Fatalf("write %s: %v", bundleName, err)
+		if err := writeK2B(filepath.Join(*outDir, c.Code+"-direct.k2b"), sets); err != nil {
+			log.Fatalf("write %s-direct.k2b: %v", c.Code, err)
 		}
-	}
-
-	// Copy app-bypass YAML presets from app-bypass/<region>.yaml into the
-	// output dir as app-bypass-<region>.yaml so they ride the same CDN +
-	// tarball + jsdelivr path as the .k2b bundles. The k2 engine's
-	// appbypass.Load expects the "app-bypass-" prefix; the source repo
-	// uses the cleaner app-bypass/{cc}.yaml layout, so we rename on copy.
-	if err := publishAppBypassPresets("app-bypass", *outDir); err != nil {
-		log.Fatalf("publish app-bypass: %v", err)
+		// Pull the region's app-bypass YAML if one exists.
+		appsPath := filepath.Join("app-bypass", c.Code+".yaml")
+		apps, err := loadAppBypassYAML(appsPath)
+		if err != nil {
+			log.Fatalf("load %s: %v", appsPath, err)
+		}
+		if apps == nil {
+			log.Printf("  app-bypass: no %s — .krs will be routing-only", appsPath)
+		} else {
+			log.Printf("  app-bypass: loaded %s", appsPath)
+		}
+		if err := writeKRSBundle(filepath.Join(*outDir, c.Code+".krs"), sets, apps); err != nil {
+			log.Fatalf("write %s.krs: %v", c.Code, err)
+		}
 	}
 
 	// Generate manifest from whatever .k2b + app-bypass-*.yaml files are
@@ -89,41 +100,6 @@ func main() {
 
 	log.Println("=== done ===")
 	log.Printf("output: %s\n", *outDir)
-}
-
-// publishAppBypassPresets copies app-bypass/<region>.yaml → outDir/app-bypass-<region>.yaml.
-// Missing srcDir is non-fatal (the build still ships .k2b bundles). Only
-// *.yaml files at the top level of srcDir are copied; subdirectories and
-// docs (README.md etc.) are skipped.
-func publishAppBypassPresets(srcDir, outDir string) error {
-	entries, err := os.ReadDir(srcDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			log.Printf("app-bypass: %s missing, skipping", srcDir)
-			return nil
-		}
-		return err
-	}
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".yaml") {
-			continue
-		}
-		region := strings.TrimSuffix(name, ".yaml")
-		if region == "" {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(srcDir, name))
-		if err != nil {
-			return fmt.Errorf("read %s: %w", name, err)
-		}
-		dst := filepath.Join(outDir, "app-bypass-"+region+".yaml")
-		if err := os.WriteFile(dst, data, 0644); err != nil {
-			return fmt.Errorf("write %s: %w", dst, err)
-		}
-		log.Printf("app-bypass: published %s -> %s (%d bytes)", name, filepath.Base(dst), len(data))
-	}
-	return nil
 }
 
 // cloneV2fly does a shallow clone of v2fly/domain-list-community.
@@ -912,16 +888,19 @@ func buildManifest(dir string) manifest {
 	}
 	for _, entry := range entries {
 		name := entry.Name()
-		// .k2b bundle: key = basename without suffix (e.g. "overseas",
-		// "cn-direct"). app-bypass-<region>.yaml: key = full filename
-		// (e.g. "app-bypass-cn.yaml") so the engine's appbypass.Load can
-		// match by glob without a separate index.
+		// Manifest keys:
+		//   .k2b   → basename without suffix (e.g. "overseas", "cn-direct")
+		//   .krs   → basename without suffix (e.g. "overseas", "cn")
+		// The k2 client looks up `<region>.krs` (current) or
+		// `<region>-direct.k2b` (legacy) by key. .krs and .k2b can share
+		// a key when both ship for the same region; the client picks
+		// whichever it knows how to read.
 		var key string
 		switch {
 		case strings.HasSuffix(name, ".k2b"):
 			key = strings.TrimSuffix(name, ".k2b")
-		case strings.HasPrefix(name, "app-bypass-") && strings.HasSuffix(name, ".yaml"):
-			key = name
+		case strings.HasSuffix(name, ".krs"):
+			key = strings.TrimSuffix(name, ".krs")
 		default:
 			continue
 		}

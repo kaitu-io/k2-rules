@@ -1,123 +1,135 @@
 # App Bypass YAML presets
 
-Region-specific app-routing presets shipped via the same CDN as `.k2b` bundles. Each `app-bypass-<region>.yaml` file (where `<region>` is an ISO 3166-1 alpha-2 lowercase code) declares which installed apps the k2 engine should route direct on a user whose smart-routing region matches.
+Region-specific app-routing presets, schema v2. **Compile sources only** — these YAMLs are read by the `k2-rules-gen` build pipeline and compiled into the AndroidInstallers / AndroidApps / WindowsApps / DarwinApps sections of `dist/<region>.krs`. The YAML files themselves are **not** published to CDN; only the compiled `.krs` binary ships.
 
-## Schema
+Authoritative validator: `tools/validate-app-bypass/main.go` — run in CI before any release.
 
-Schema version 1. The validator (`tools/validate-app-bypass/main.go`) is the authoritative source — it rejects malformed files in CI before they reach the CDN.
+## Schema (v2)
 
 ```yaml
-version: 1                       # required; reader rejects unknown versions
-region: <iso-cc>                 # required; must equal filename's region code
-description: |                   # optional; ignored by the parser
+version: 2                         # required; validator rejects anything else
+region: <iso-cc>                   # required; must equal filename's region code
+description: |                     # optional; ignored at compile time
   Free-form maintainer notes.
 
-# ── Android (case-sensitive reverse-domain identifiers) ──
+# ── Android (case-sensitive package names) ──
 android:
-  installer_exact:
-    - <packageName-of-installer>
-  package_exact:
-    - <packageName>
-  package_prefix:
-    - <packagePrefix>.           # MUST end with a dot
+  installers:                      # exact-match strings (NO glob — '*' is rejected)
+    - com.xiaomi.market
+    - com.huawei.appmarket
+  apps:                            # glob patterns (single-* semantics, case-sensitive)
+    - "com.tencent.*"              # matches com.tencent.mm, com.tencent.qq, etc.
+    - "com.eg.android.AlipayGphone" # literal pattern (no '*') is exact match
 
-# ── Desktop (case-insensitive, one entry covers macOS/Windows/Linux) ──
-desktop:
-  process_exact:
-    - <basename>
-  process_prefix:
-    - <basenamePrefix>
+# ── Windows (case-insensitive; compiler lowercases) ──
+windows:
+  apps:                            # glob, lowercased at compile
+    - "WeChat*"                    # matches WeChat.exe, WeChatHelper.exe, etc.
+
+# ── macOS (case-sensitive process basenames) ──
+darwin:
+  apps:                            # glob, case preserved
+    - "WeChat"                     # exact match for "WeChat" only
+    - "WeChatHelper*"              # prefix glob
 ```
 
-## Matching semantics
+## Glob semantics
 
-| YAML field | Matched against | Comparison |
-|---|---|---|
-| `android.installer_exact` | `PackageManager.getInstallSourceInfo(pkg).installingPackageName` | exact, case-sensitive |
-| `android.package_exact` | `packageName` | exact, case-sensitive |
-| `android.package_prefix` | `packageName` | `strings.HasPrefix`, case-sensitive |
-| `desktop.process_exact` | `ProcessSearcher` returned process name | `strings.EqualFold` (case-insensitive) |
-| `desktop.process_prefix` | same | `strings.HasPrefix(lower, lower)` |
+Single `*` matches **zero or more arbitrary characters**. No `?`, `[...]`, brace expansion, or path-segment semantics.
 
-Desktop entries are normalized to lowercase at compile-time inside the engine — write them in whatever case is natural; the engine lowercases at load.
+| Pattern | Matches | Doesn't match |
+|---------|---------|---------------|
+| `WeChat` | `WeChat` only | `WeChatHelper` |
+| `WeChat*` | `WeChat`, `WeChatHelper`, `WeChat.exe` | anything not starting with `WeChat` |
+| `*chat` | `chat`, `wechat` | `chats`, `chatter` |
+| `*chat*` | `WeChat`, `chat`, `chatter` | anything not containing `chat` |
+| `Wei*Chat` | `WeiChat`, `WeiXinChat` | `WeChat` |
 
-## Hard rules (validator enforces these)
+Case handling:
+- **windows.apps** — patterns lowercased at compile; reader lowercases queries before matching.
+- **android.apps / darwin.apps** — case preserved both ends.
 
-- `version: 1` required.
-- `region:` must match filename (`app-bypass-cn.yaml` → `region: cn`).
-- `package_prefix` entries MUST end with a dot. (`com.tencent.` not `com.tencent`.) The validator rejects the file otherwise. Reason: `com.tencent` would also match `com.tencentlabs.foo` etc.
-- No empty strings, no whitespace-only entries.
-- ≤ 500 entries per platform section.
-- Duplicate entries within or across kinds (exact ∪ prefix) are rejected.
+## Validator rules
+
+The validator (`tools/validate-app-bypass`) rejects:
+
+- `version` ≠ 2
+- `region:` value mismatching the filename
+- Unknown top-level fields (strict YAML parsing)
+- Empty entries or leading/trailing whitespace
+- Entry length > 256 bytes
+- > 500 entries per platform section
+- Duplicates within a section
+- `*` inside an `installers` entry (installers are exact-match)
+- The all-wildcard pattern `"*"` (almost certainly an accidental wildcard)
+- Whitespace inside entries
+
+Run locally before opening a PR:
+
+```bash
+go run ./tools/validate-app-bypass app-bypass/
+```
 
 ## Maintenance SOP
 
 ### Adding an entry
 
-1. **Verify the package**: install the actual app on a fresh device, then `adb shell pm list packages -f` to grab the exact `packageName`. Don't rely on store listings — they sometimes show legacy names.
-2. **Pick the right kind**:
-   - `installer_exact`: the app store itself. One entry covers every app installed via that store.
-   - `package_exact`: a specific app whose namespace is shared with foreign apps (don't prefix-match if collisions exist).
-   - `package_prefix`: a vendor namespace dedicated to the target region (`com.tencent.` for Tencent's CN ecosystem).
-3. **Open a PR** to this repo. CI runs the validator + builds a fresh bundle.
-4. **Merge** → daily-build.yml ships the new YAML to the CDN within 24h. Devices pick it up on next rule refresh (engine refreshes hourly).
+1. **Verify the package/process name**: install the real app and inspect:
+   - Android: `adb shell pm list packages -f`
+   - macOS: `lsof -p $(pgrep -f 'AppName' | head -1)` or `ps -A -o comm | grep -i app`
+   - Windows: Task Manager → Details tab, exact `.exe` name
+2. **Pick the right section**:
+   - `android.installers` — the app store itself (one entry → every app installed via that store)
+   - `android.apps` — a specific app or vendor namespace (`com.tencent.*`)
+   - `windows.apps` / `darwin.apps` — desktop process basenames
+3. **Test locally**:
+
+```bash
+# Validate schema
+go run ./tools/validate-app-bypass app-bypass/
+
+# Run the full krs/ test suite (round-trip + match correctness)
+go test ./krs/
+
+# Build a .krs locally and inspect the manifest
+go run . -o /tmp/dist -country=cn
+ls /tmp/dist/cn.krs
+cat /tmp/dist/manifest.json | jq .bundles.cn
+```
+
+4. **Open a PR**. CI runs the validator + krs/ tests.
+5. **Merge** → daily-build.yml ships the new `.krs` to CDN within 24h. Devices pick it up on next rule refresh.
 
 ### Removing an entry
 
 1. Open PR deleting the line.
 2. Merge → CDN updated → devices pick up the smaller list on next refresh.
-3. Rolling back stale installs: cannot — the YAML on a user's disk persists until the next refresh tick. Acceptable since "this app no longer needs bypass" is rarely time-critical.
 
 ### Emergency rollback (bad pattern blocks an app)
 
-If a recently-shipped YAML breaks user experience:
+1. Identify the bad entry from user reports.
+2. PR to remove or correct.
+3. Merge → CI publishes the new bundle within minutes.
+4. Tell affected user to reconnect (or wait ≤1 hour for engine auto-refresh).
 
-1. Identify the bad entry (usually via user feedback — "X app started crashing/timing out").
-2. PR to remove or correct the entry.
-3. Merge ASAP — CDN serves the new file within minutes once the GitHub release publishes.
-4. Tell user to disconnect + reconnect to pick up the new bundle (or wait ≤1 hour for the engine's auto-refresh).
+For full preset rollback (entire region broken):
+- Revert the offending commit on `master`.
+- Devices fall back to the previous bundle on disk until the next refresh.
 
-For a full preset rollback (entire region preset is broken):
-- Revert the `app-bypass-<region>.yaml` commit.
-- Devices fall back to the previous bundle content already on disk.
-- They re-fetch on next refresh and get the rolled-back version.
-
-### Testing locally before PR
-
-```bash
-# 1. Validate schema
-go run ./tools/validate-app-bypass app-bypass/
-
-# 2. Build a fresh bundle and verify the YAML is included
-go build -o /tmp/k2-rules-gen .
-/tmp/k2-rules-gen -o /tmp/dist/
-ls /tmp/dist/app-bypass-*.yaml          # your new file should be here
-
-# 3. Test against a real k2 install (advanced)
-#    Copy /tmp/dist/app-bypass-<region>.yaml into the k2 rule cache:
-#      macOS:   ~/Library/Caches/kaitu/rules/
-#      Linux:   ~/.cache/kaitu/rules/
-#      Windows: %LOCALAPPDATA%\kaitu\rules\
-#    Restart the k2 daemon and verify app-bypass-preview action
-#    returns the expected matches:
-#      curl -X POST http://127.0.0.1:1777/api/core \
-#        -d '{"action":"app-bypass-preview"}'
-```
-
-### File anatomy
+## File anatomy
 
 | File | What it does |
 |---|---|
-| `cn.yaml` | China region — top-of-funnel ecosystem |
-| `ir.yaml` | Iran region — banking + taxi + gov + main stores |
+| `cn.yaml` | China region — top-of-funnel ecosystem (Tencent, Alibaba, ByteDance, etc.) |
+| `ir.yaml` | Iran region — banking + Cafe Bazaar / Myket app stores + taxi |
 | (future) | `ru.yaml`, `tr.yaml`, etc. as user demand surfaces |
 
 ## Privacy
 
-Each YAML file is **public**. Anyone with the CDN URL can read which apps the publisher considers regionally-locked. This is the same threat model as the `.k2b` rule files. Do not include user data here; only publisher-curated patterns.
+Each YAML file is **public source** (in this repo). The compiled `.krs` is **also public** (CDN-served). Anyone with the URL can read which apps the publisher considers regionally-locked. This is the same threat model as the legacy `.k2b` rule files. Do not include user data here — only publisher-curated patterns.
 
 ## See also
 
-- Spec: [`docs/superpowers/specs/2026-05-25-app-bypass-engine-managed-design.md`](https://github.com/kaitu-io/k2app/blob/main/docs/superpowers/specs/2026-05-25-app-bypass-engine-managed-design.md)
-- Validator: [`tools/validate-app-bypass/main.go`](../tools/validate-app-bypass/main.go)
-- k2 engine consumer: [`k2/appbypass/`](https://github.com/kaitu-io/k2/tree/master/appbypass)
+- `.krs` wire format & TypeID namespace — repo root `CLAUDE.md`
+- Reader / writer / match library — `github.com/kaitu-io/k2-rules/krs`
+- Validator — `tools/validate-app-bypass/main.go`

@@ -32,11 +32,11 @@ jobs:
 
       - name: Build tarball + VERSION
         run: |
-          # Bundle .k2b + app-bypass-*.yaml so the client downloads both
-          # in one shot. app-bypass-*.yaml lives next to .k2b in the
-          # engine's runtime cache.
+          # Bundle every published format: legacy .k2b + current .krs.
+          # During the ~6 month transition both ship together; clients
+          # pick whichever they know how to read.
           cd dist
-          tar -czf k2-rules.tar.gz *.k2b app-bypass-*.yaml
+          tar -czf k2-rules.tar.gz *.k2b *.krs
           ls -lh k2-rules.tar.gz
           printf '%s sha256:%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(sha256sum k2-rules.tar.gz | awk '{print $1}')" > VERSION
           cat VERSION
@@ -79,14 +79,14 @@ jobs:
           git push origin ":refs/tags/${TAG}" 2>/dev/null || true
 
           # Create new release.
-          # Upload every .k2b file in dist/ so the country fleet (overseas +
-          # cn/ir/ru/tr/pk/vn/mm/eg/id/sa/ae/th/bd/by/tm/kz/uz) is published without
-          # having to enumerate each bundle here.
+          # Upload every .k2b (legacy) and .krs (current) file in dist/ so the
+          # country fleet (overseas + cn/ir/ru/tr/pk/vn/mm/eg/id/sa/ae/th/bd/by/tm/kz/uz)
+          # is published without having to enumerate each bundle here.
           gh release create "${TAG}" \
             --title "Rules ${VERSION}" \
             --notes "Auto-generated from upstream sources. See ATTRIBUTION.md." \
             dist/*.k2b \
-            dist/app-bypass-*.yaml \
+            dist/*.krs \
             dist/manifest.json \
             dist/k2-rules.tar.gz \
             dist/VERSION
@@ -96,11 +96,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Stash the freshly-built artifacts
+          # Stash the freshly-built artifacts (legacy .k2b + current .krs).
+          # manifest.json is included so jsdelivr can serve it from @release;
+          # the GitHub Release asset upload is the authoritative copy.
           mkdir -p /tmp/release-artifacts
-          cp dist/*.k2b dist/k2-rules.tar.gz dist/VERSION /tmp/release-artifacts/
-          # Include app-bypass YAML presets when present (no-op if dir empty).
-          cp dist/app-bypass-*.yaml /tmp/release-artifacts/ 2>/dev/null || true
+          cp dist/*.k2b dist/*.krs dist/manifest.json dist/k2-rules.tar.gz dist/VERSION /tmp/release-artifacts/
 
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
@@ -110,7 +110,7 @@ jobs:
           git checkout release
 
           # Replace all contents with the freshly-built artifact set.
-          # The release branch only contains .k2b + tarball + VERSION; no source.
+          # Release branch carries .k2b + .krs + tarball + VERSION; no source.
           git rm -rf . 2>/dev/null || true
           cp /tmp/release-artifacts/* .
 
@@ -132,10 +132,7 @@ jobs:
           base="https://purge.jsdelivr.net/gh/kaitu-io/k2-rules@release"
           paths=(k2-rules.tar.gz VERSION manifest.json)
           for f in dist/*.k2b; do paths+=("$(basename "$f")"); done
-          for f in dist/app-bypass-*.yaml; do
-            [ -e "$f" ] || continue
-            paths+=("$(basename "$f")")
-          done
+          for f in dist/*.krs; do paths+=("$(basename "$f")"); done
           for p in "${paths[@]}"; do
             echo "purge: $p"
             # 5s connect / 15s total — purge endpoint is best-effort, never fail the build

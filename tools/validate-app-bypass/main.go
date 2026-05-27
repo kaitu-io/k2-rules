@@ -1,14 +1,13 @@
-// validate-app-bypass lints app-bypass-<region>.yaml files in this repo
-// before the daily rule build ships them to CDN. Exits 1 on any violation
-// so CI fails fast.
+// validate-app-bypass lints app-bypass/<region>.yaml files before they are
+// compiled into .krs bundles. Exits 1 on any violation so CI fails fast.
 //
 // Run from repo root:
 //
 //	go run ./tools/validate-app-bypass app-bypass/
 //
-// Schema source of truth: k2/appbypass + spec
-//
-//	docs/superpowers/specs/2026-05-25-app-bypass-engine-managed-design.md (§4, §11.2).
+// Schema is v2 — see app-bypass/README.md for field meanings.
+// The v2 YAML is the compile source for app sections inside .krs bundles
+// (see github.com/kaitu-io/k2-rules/krs for the wire format).
 package main
 
 import (
@@ -24,7 +23,7 @@ import (
 )
 
 const (
-	supportedVersion = 1
+	supportedVersion = 2
 	maxEntryLen      = 256
 	maxEntriesPerSet = 500
 )
@@ -34,18 +33,21 @@ type rawFile struct {
 	Region      string     `yaml:"region"`
 	Description string     `yaml:"description,omitempty"`
 	Android     rawAndroid `yaml:"android,omitempty"`
-	Desktop     rawDesktop `yaml:"desktop,omitempty"`
+	Windows     rawWindows `yaml:"windows,omitempty"`
+	Darwin      rawDarwin  `yaml:"darwin,omitempty"`
 }
 
 type rawAndroid struct {
-	InstallerExact []string `yaml:"installer_exact,omitempty"`
-	PackageExact   []string `yaml:"package_exact,omitempty"`
-	PackagePrefix  []string `yaml:"package_prefix,omitempty"`
+	Installers []string `yaml:"installers,omitempty"` // exact-match
+	Apps       []string `yaml:"apps,omitempty"`       // glob, case-sensitive
 }
 
-type rawDesktop struct {
-	ProcessExact  []string `yaml:"process_exact,omitempty"`
-	ProcessPrefix []string `yaml:"process_prefix,omitempty"`
+type rawWindows struct {
+	Apps []string `yaml:"apps,omitempty"` // glob, case-insensitive
+}
+
+type rawDarwin struct {
+	Apps []string `yaml:"apps,omitempty"` // glob, case-sensitive
 }
 
 func main() {
@@ -115,16 +117,10 @@ func validateFile(path string) []error {
 		errs = append(errs, fmt.Errorf("region %q must match filename %q", raw.Region, expectRegion))
 	}
 
-	errs = append(errs, lintEntries("android.installer_exact", raw.Android.InstallerExact, lintExact)...)
-	errs = append(errs, lintEntries("android.package_exact", raw.Android.PackageExact, lintExact)...)
-	errs = append(errs, lintEntries("android.package_prefix", raw.Android.PackagePrefix, lintPackagePrefix)...)
-	errs = append(errs, lintEntries("desktop.process_exact", raw.Desktop.ProcessExact, lintExact)...)
-	errs = append(errs, lintEntries("desktop.process_prefix", raw.Desktop.ProcessPrefix, lintExact)...)
-
-	errs = append(errs, lintCrossDuplicates("android.package_exact vs android.package_prefix",
-		raw.Android.PackageExact, raw.Android.PackagePrefix, false)...)
-	errs = append(errs, lintCrossDuplicates("desktop.process_exact vs desktop.process_prefix",
-		raw.Desktop.ProcessExact, raw.Desktop.ProcessPrefix, true)...)
+	errs = append(errs, lintEntries("android.installers", raw.Android.Installers, lintExactNoGlob)...)
+	errs = append(errs, lintEntries("android.apps", raw.Android.Apps, lintGlob)...)
+	errs = append(errs, lintEntries("windows.apps", raw.Windows.Apps, lintGlob)...)
+	errs = append(errs, lintEntries("darwin.apps", raw.Darwin.Apps, lintGlob)...)
 
 	return errs
 }
@@ -142,7 +138,7 @@ func parseStrict(data []byte) (*rawFile, error) {
 type entryLinter func(string) error
 
 // lintEntries enforces per-set caps + per-entry constraints + intra-set
-// duplicate detection. Returns one error per violation.
+// duplicate detection. Whitespace and empty entries flagged as separate errors.
 func lintEntries(setName string, entries []string, perEntry entryLinter) []error {
 	if len(entries) > maxEntriesPerSet {
 		return []error{fmt.Errorf("%s: %d entries exceeds cap %d", setName, len(entries), maxEntriesPerSet)}
@@ -152,7 +148,7 @@ func lintEntries(setName string, entries []string, perEntry entryLinter) []error
 	for i, e := range entries {
 		trimmed := strings.TrimSpace(e)
 		if trimmed != e {
-			errs = append(errs, fmt.Errorf("%s[%d]: leading/trailing whitespace", setName, i))
+			errs = append(errs, fmt.Errorf("%s[%d]: leading/trailing whitespace in %q", setName, i, e))
 		}
 		if trimmed == "" {
 			errs = append(errs, fmt.Errorf("%s[%d]: empty entry", setName, i))
@@ -176,48 +172,28 @@ func lintEntries(setName string, entries []string, perEntry entryLinter) []error
 	return errs
 }
 
-func lintExact(s string) error {
+// lintExactNoGlob: Android installers are exact-match identifiers — no `*`.
+func lintExactNoGlob(s string) error {
+	if strings.ContainsRune(s, '*') {
+		return errors.New("installers must be exact-match (no '*' allowed)")
+	}
 	if strings.ContainsAny(s, " \t") {
 		return errors.New("contains whitespace")
 	}
 	return nil
 }
 
-func lintPackagePrefix(s string) error {
-	if err := lintExact(s); err != nil {
-		return err
+// lintGlob: app patterns support single-* glob. Empty/all-`*` patterns are
+// already rejected upstream (empty → trimmed empty; "*" alone matches
+// everything which is almost certainly a maintainer error).
+func lintGlob(s string) error {
+	if s == "*" {
+		return errors.New("pattern '*' matches everything — reject as accidental wildcard")
 	}
-	if !strings.HasSuffix(s, ".") {
-		return errors.New("package_prefix must end with '.' to prevent boundary collisions (e.g. 'com.tencent' would match 'com.tencentX.foo')")
+	if strings.ContainsAny(s, " \t") {
+		return errors.New("contains whitespace")
 	}
 	return nil
-}
-
-// lintCrossDuplicates flags entries that appear both in an exact set and
-// the matching prefix set. caseInsensitive=true is appropriate for desktop
-// where the matcher is case-insensitive; case-sensitive for android.
-func lintCrossDuplicates(label string, exact, prefix []string, caseInsensitive bool) []error {
-	if len(exact) == 0 || len(prefix) == 0 {
-		return nil
-	}
-	norm := func(s string) string {
-		if caseInsensitive {
-			return strings.ToLower(s)
-		}
-		return s
-	}
-	exactSet := make(map[string]string, len(exact))
-	for _, e := range exact {
-		exactSet[norm(e)] = e
-	}
-	var errs []error
-	for _, p := range prefix {
-		key := norm(p)
-		if orig, hit := exactSet[key]; hit {
-			errs = append(errs, fmt.Errorf("%s: %q (prefix) duplicates %q (exact)", label, p, orig))
-		}
-	}
-	return errs
 }
 
 func fail(format string, args ...any) {
