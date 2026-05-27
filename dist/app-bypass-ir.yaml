@@ -1,0 +1,68 @@
+# app-bypass-ir.yaml — bypass list for users in Iran.
+#
+# Consumed by k2 engine (k2/appbypass package) via the same CDN that ships
+# .k2b bundles. Schema v1; reader gates on version + region == filename.
+#
+# Maintenance guidelines (see README.md for the full SOP):
+#   - installer_exact / package_exact entries are case-sensitive reverse-domain
+#     identifiers — copy them verbatim from PackageManager output.
+#   - package_prefix entries MUST end with a dot so `ir.tapsi.` doesn't
+#     accidentally match `ir.tapsipro.foo`.
+#   - desktop entries are matched case-insensitive; one entry covers all three
+#     desktop platforms.
+#   - Conservative starting set — expand only after user-reported
+#     false-positives stay at zero for the existing entries.
+
+version: 1
+region: ir
+description: |
+  Bypass list for users in Iran. Routes Iranian-ecosystem apps (banking,
+  Cafe Bazaar / Myket-installed apps, taxi apps) direct so they see an
+  Iranian source IP. The rest of the traffic continues through the VPN
+  tunnel.
+
+# ── Android ─────────────────────────────────────────────────────────
+android:
+  installer_exact:
+    # Cafe Bazaar — Iran's primary Android app store
+    - com.farsitel.bazaar
+    # Myket — secondary store
+    - ir.mservices.market
+
+  package_exact:
+    # Iranian banking apps that hard-reject non-IR IPs
+    # NOTE: verify each entry against current production package name
+    # before merging — banks rebrand and renumber.
+    - com.adpdigital.mbs.ayande      # Ayande (banking aggregator) # verify
+    - ir.bki.mobilebank              # Bank Keshavarzi # verify
+    - com.refahbank.dpi.android      # Bank Refah # verify
+
+  package_prefix:
+    # Iranian govt / public services
+    - gov.iran.
+    - ir.gov.
+
+    # Iranian taxi / ride-hailing (geo-locked to IR)
+    - ir.snapp.
+    - taxi.tap30.
+    - ir.tapsi.
+
+    # Iranian e-commerce + delivery
+    - ir.divar.
+    - com.digikala.
+    - ir.basalam.
+
+    # Iranian banking namespaces (catch new bank apps automatically)
+    - ir.bki.
+    - ir.parsian.
+    - ir.sb24.
+    - com.persianswitch.
+
+# ── Desktop (macOS + Windows + Linux, case-insensitive matcher) ────
+# Iran has comparatively few Iranian-specific desktop apps with VPN
+# IP-routing requirements; leave desktop section empty for v0.4.5 and
+# expand as user reports arrive. To add an entry later:
+#   desktop:
+#     process_prefix:
+#       - SomeIranianApp
+desktop: {}
