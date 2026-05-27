@@ -3,6 +3,7 @@ package krs_test
 import (
 	"bytes"
 	"encoding/binary"
+	"net/netip"
 	"testing"
 
 	"github.com/kaitu-io/k2-rules/krs"
@@ -122,6 +123,193 @@ func TestWriteBundle_DomainSuffix_SortsAndLowers(t *testing.T) {
 	}
 	if !bytes.Equal(payload, wantPayload) {
 		t.Errorf("DomainSuffix payload:\n got: %x\nwant: %x", payload, wantPayload)
+	}
+}
+
+// Writer must be deterministic — repeated writes of the same Bundle, and
+// writes of semantically equivalent Bundles (rules in different input
+// order), must produce byte-identical output. CI release-skip logic
+// compares SHA256s across daily builds; nondeterminism would force
+// spurious releases.
+func TestWriteBundle_Deterministic(t *testing.T) {
+	build := func(domainOrder, cidrOrder, appOrder []int) *krs.Bundle {
+		domains := []string{"google.com", "youtube.com", "gstatic.com"}
+		cidrs := []string{"8.8.8.0/24", "1.1.1.0/24", "9.9.9.0/24"}
+		apps := []string{"com.tencent.*", "com.taobao.*", "com.alibaba.*"}
+		permute := func(src []string, order []int) []string {
+			out := make([]string, len(src))
+			for i, idx := range order {
+				out[i] = src[idx]
+			}
+			return out
+		}
+		return &krs.Bundle{
+			Sets: []krs.NamedSet{{
+				Name:           "set",
+				DomainSuffixes: permute(domains, domainOrder),
+				CIDRs:          permute(cidrs, cidrOrder),
+			}},
+			Apps: &krs.AppPatterns{
+				Android: krs.AndroidPatterns{Apps: permute(apps, appOrder)},
+			},
+		}
+	}
+	encode := func(b *krs.Bundle) []byte {
+		var buf bytes.Buffer
+		if err := krs.WriteBundle(&buf, b); err != nil {
+			t.Fatalf("WriteBundle: %v", err)
+		}
+		return buf.Bytes()
+	}
+
+	// Repeated writes of the same input.
+	a := encode(build([]int{0, 1, 2}, []int{0, 1, 2}, []int{0, 1, 2}))
+	b := encode(build([]int{0, 1, 2}, []int{0, 1, 2}, []int{0, 1, 2}))
+	if !bytes.Equal(a, b) {
+		t.Errorf("same input produced different bytes:\n a=%x\n b=%x", a, b)
+	}
+
+	// Semantically equivalent input in permuted order.
+	c := encode(build([]int{2, 0, 1}, []int{1, 2, 0}, []int{2, 1, 0}))
+	if !bytes.Equal(a, c) {
+		t.Errorf("permuted input changed output bytes:\n a=%x\n c=%x", a, c)
+	}
+
+	// Duplicated input — should dedup to the same output.
+	dupBundle := &krs.Bundle{Sets: []krs.NamedSet{{
+		Name:           "set",
+		DomainSuffixes: []string{"google.com", "google.com", "youtube.com", "gstatic.com", "youtube.com"},
+		CIDRs:          []string{"8.8.8.0/24", "8.8.8.0/24", "1.1.1.0/24", "9.9.9.0/24"},
+	}}, Apps: &krs.AppPatterns{
+		Android: krs.AndroidPatterns{Apps: []string{"com.tencent.*", "com.tencent.*", "com.taobao.*", "com.alibaba.*"}},
+	}}
+	d := encode(dupBundle)
+	if !bytes.Equal(a, d) {
+		t.Errorf("duplicated input did not dedup to canonical form:\n a=%x\n d=%x", a, d)
+	}
+}
+
+// End-to-end semantic round-trip: a bundle exercising every TypeID currently
+// emitted (domains, excludes, IPv4, IPv6, all four app sections) must
+// produce identical Match* behavior after Write→Read.
+//
+// Byte-level round-trip tests would not catch a regression where the reader
+// silently drops a section type or misroutes by set_idx — those would still
+// produce a parseable Bundle. This test compares actual matching outcomes
+// against the input, so any semantic divergence is caught immediately.
+func TestRoundTrip_SemanticEquivalence_AllFeatures(t *testing.T) {
+	in := &krs.Bundle{
+		Sets: []krs.NamedSet{
+			{
+				Name:           "google",
+				DomainSuffixes: []string{"google.com", "youtube.com"},
+				ExcludeDomains: []string{"localized.google.com"},
+				CIDRs:          []string{"8.8.8.0/24", "2001:db8::/32"},
+			},
+			{
+				Name:           "cn-sites",
+				DomainSuffixes: []string{"qq.com", "weixin.qq.com", "taobao.com"},
+				ExcludeDomains: []string{"intl.qq.com"},
+				CIDRs:          []string{"1.0.0.0/8"},
+			},
+		},
+		Apps: &krs.AppPatterns{
+			Android: krs.AndroidPatterns{
+				Installers: []string{"com.android.vending"},
+				Apps:       []string{"com.tencent.*", "com.taobao.*"},
+			},
+			Windows: krs.WindowsPatterns{Apps: []string{"wechat*", "qq*"}},
+			Darwin:  krs.DarwinPatterns{Apps: []string{"WeChat*", "DingTalk*"}},
+		},
+	}
+
+	var buf bytes.Buffer
+	if err := krs.WriteBundle(&buf, in); err != nil {
+		t.Fatalf("WriteBundle: %v", err)
+	}
+	out, err := krs.ReadBundle(buf.Bytes())
+	if err != nil {
+		t.Fatalf("ReadBundle: %v", err)
+	}
+
+	if len(out.Sets) != len(in.Sets) {
+		t.Fatalf("set count: in=%d out=%d", len(in.Sets), len(out.Sets))
+	}
+	for i := range in.Sets {
+		if out.Sets[i].Name != in.Sets[i].Name {
+			t.Errorf("set[%d].Name: in=%q out=%q", i, in.Sets[i].Name, out.Sets[i].Name)
+		}
+	}
+
+	// Domain matches.
+	domainCases := []struct {
+		setIdx     int
+		host       string
+		want       bool
+		annotation string
+	}{
+		{0, "google.com", true, "google include"},
+		{0, "mail.google.com", true, "google subdomain"},
+		{0, "youtube.com", true, "second google include"},
+		{0, "localized.google.com", false, "google exclude"},
+		{0, "subdomain.localized.google.com", false, "exclude subdomain"},
+		{0, "qq.com", false, "cn rule not in google set"},
+		{1, "qq.com", true, "cn include"},
+		{1, "mp.weixin.qq.com", true, "deep child under cn parent"},
+		{1, "taobao.com", true, "second cn include"},
+		{1, "intl.qq.com", false, "cn exclude"},
+		{1, "google.com", false, "google rule not in cn set"},
+	}
+	for _, tc := range domainCases {
+		if got := out.Sets[tc.setIdx].MatchDomain(tc.host); got != tc.want {
+			t.Errorf("MatchDomain set[%d]=%s host=%q (%s): got %v want %v",
+				tc.setIdx, out.Sets[tc.setIdx].Name, tc.host, tc.annotation, got, tc.want)
+		}
+	}
+
+	// IP matches.
+	ipCases := []struct {
+		setIdx int
+		addr   string
+		want   bool
+	}{
+		{0, "8.8.8.42", true},
+		{0, "8.8.9.0", false},
+		{0, "2001:db8::1", true},
+		{0, "2001:db9::1", false},
+		{0, "1.0.0.1", false}, // cn-sites range, not google
+		{1, "1.0.0.1", true},
+		{1, "1.255.255.255", true},
+		{1, "2.0.0.0", false},
+		{1, "8.8.8.42", false}, // google range, not cn-sites
+	}
+	for _, tc := range ipCases {
+		addr := netip.MustParseAddr(tc.addr)
+		if got := out.Sets[tc.setIdx].MatchIP(addr); got != tc.want {
+			t.Errorf("MatchIP set[%d]=%s addr=%s: got %v want %v",
+				tc.setIdx, out.Sets[tc.setIdx].Name, tc.addr, got, tc.want)
+		}
+	}
+
+	// App pattern matches across platforms.
+	if out.Apps == nil {
+		t.Fatal("out.Apps is nil after round-trip")
+	}
+	if pat, ok := out.Apps.MatchAndroidPackage("com.tencent.mm"); !ok || pat != "com.tencent.*" {
+		t.Errorf("MatchAndroidPackage(com.tencent.mm): got (%q, %v) want (com.tencent.*, true)", pat, ok)
+	}
+	if pat, ok := out.Apps.MatchAndroidInstaller("com.android.vending"); !ok || pat != "com.android.vending" {
+		t.Errorf("MatchAndroidInstaller: got (%q, %v)", pat, ok)
+	}
+	if pat, ok := out.Apps.MatchWindowsProcess("WeChat.exe"); !ok || pat != "wechat*" {
+		t.Errorf("MatchWindowsProcess(WeChat.exe): got (%q, %v) want (wechat*, true)", pat, ok)
+	}
+	if pat, ok := out.Apps.MatchDarwinProcess("WeChat Helper"); !ok || pat != "WeChat*" {
+		t.Errorf("MatchDarwinProcess(WeChat Helper): got (%q, %v) want (WeChat*, true)", pat, ok)
+	}
+	// Case sensitivity locked: Darwin must NOT match lowercased input.
+	if _, ok := out.Apps.MatchDarwinProcess("wechat"); ok {
+		t.Error("MatchDarwinProcess(wechat): matched lowercase, expected case-sensitive miss")
 	}
 }
 

@@ -114,8 +114,9 @@ func decodeStringList(payload []byte) ([]string, error) {
 			return nil, fmt.Errorf("bad uvarint at offset %d", pos)
 		}
 		pos += n
-		if pos+int(strLen) > len(payload) {
-			return nil, fmt.Errorf("string at offset %d overruns payload", pos)
+		// uint64 compare so a hostile length that wraps int stays caught.
+		if strLen > uint64(len(payload)-pos) {
+			return nil, fmt.Errorf("string at offset %d overruns payload (len=%d)", pos, strLen)
 		}
 		out = append(out, string(payload[pos:pos+int(strLen)]))
 		pos += int(strLen)

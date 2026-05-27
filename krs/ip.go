@@ -18,6 +18,44 @@ type ipRangeSection struct {
 	ends    [][]byte // len == count
 }
 
+// canonicalize sorts and merges this section's ranges. Used by the reader
+// as defense in depth: writer output is already canonical, but a hostile
+// or buggy producer could ship unsorted or overlapping ranges that bypass
+// the binary search in Contains. Idempotent — no-op when input is already
+// canonical (the common case after a canonical writer).
+func (s *ipRangeSection) canonicalize() {
+	if len(s.starts) <= 1 {
+		return
+	}
+	// Already sorted by start? Fast path skips re-merge for canonical input.
+	sorted := true
+	for i := 1; i < len(s.starts); i++ {
+		if bytes.Compare(s.starts[i-1], s.starts[i]) > 0 {
+			sorted = false
+			break
+		}
+	}
+	pairs := make([]rangePair, len(s.starts))
+	for i := range s.starts {
+		pairs[i] = rangePair{start: s.starts[i], end: s.ends[i]}
+	}
+	if !sorted {
+		sort.Slice(pairs, func(i, j int) bool {
+			return bytes.Compare(pairs[i].start, pairs[j].start) < 0
+		})
+	}
+	merged := mergeRanges(pairs, s.addrLen)
+	if len(merged) == len(s.starts) && sorted {
+		return // canonical already; preserve original slices
+	}
+	s.starts = s.starts[:0]
+	s.ends = s.ends[:0]
+	for _, p := range merged {
+		s.starts = append(s.starts, p.start)
+		s.ends = append(s.ends, p.end)
+	}
+}
+
 // Contains reports whether addr is within any range in this section.
 func (s *ipRangeSection) Contains(raw []byte) bool {
 	if len(s.starts) == 0 || len(raw) != s.addrLen {

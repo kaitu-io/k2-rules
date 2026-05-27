@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log/slog"
+	"sort"
 )
 
 const headerSize = 8
@@ -31,21 +32,49 @@ func ReadBundle(data []byte) (*Bundle, error) {
 		return nil, fmt.Errorf("krs: data too short for %d-section index", sectionCount)
 	}
 
-	for i := range sectionCount {
-		entry := data[headerSize+i*indexEntrySize:]
-		typeID := binary.LittleEndian.Uint16(entry[0:2])
-		offset := binary.LittleEndian.Uint32(entry[2:6])
-		length := binary.LittleEndian.Uint32(entry[6:10])
+	// Two-pass decode so file-order is irrelevant (CLAUDE.md format
+	// contract: "section index is authoritative — file order does not
+	// matter"). Per-set sections (Domain/IP) depend on SetTable having
+	// allocated b.Sets, so SetTable goes first regardless of position.
+	for pass := range 2 {
+		for i := range sectionCount {
+			entry := data[headerSize+i*indexEntrySize:]
+			typeID := binary.LittleEndian.Uint16(entry[0:2])
+			offset := binary.LittleEndian.Uint32(entry[2:6])
+			length := binary.LittleEndian.Uint32(entry[6:10])
 
-		if uint64(offset)+uint64(length) > uint64(len(data)) {
-			return nil, fmt.Errorf("krs: section[%d] type=0x%04x payload out of bounds (off=%d len=%d data=%d)",
-				i, typeID, offset, length, len(data))
-		}
-		payload := data[offset : offset+length]
+			if uint64(offset)+uint64(length) > uint64(len(data)) {
+				return nil, fmt.Errorf("krs: section[%d] type=0x%04x payload out of bounds (off=%d len=%d data=%d)",
+					i, typeID, offset, length, len(data))
+			}
+			payload := data[offset : offset+length]
 
-		if err := decodeSection(b, typeID, payload); err != nil {
-			return nil, fmt.Errorf("krs: section[%d] type=0x%04x: %w", i, typeID, err)
+			isSetTable := typeID == typeSetTable
+			if (pass == 0) != isSetTable {
+				continue
+			}
+			if err := decodeSection(b, typeID, payload); err != nil {
+				return nil, fmt.Errorf("krs: section[%d] type=0x%04x: %w", i, typeID, err)
+			}
 		}
+	}
+
+	// Defense in depth: the writer is the canonical sorter, but a malicious
+	// or buggy producer could ship unsorted entries. Match algorithms binary-
+	// search these slices; unsorted input silently hides legitimate rules
+	// (CDN-compromise routing bypass). Re-sort every set's reversed slice so
+	// search correctness is independent of producer trust.
+	for i := range b.Sets {
+		s := &b.Sets[i].domainSection.reversed
+		if !sort.StringsAreSorted(*s) {
+			sort.Strings(*s)
+		}
+		s = &b.Sets[i].excludeSection.reversed
+		if !sort.StringsAreSorted(*s) {
+			sort.Strings(*s)
+		}
+		b.Sets[i].ipv4.canonicalize()
+		b.Sets[i].ipv6.canonicalize()
 	}
 	return b, nil
 }
@@ -101,8 +130,9 @@ func decodeDomainBySet(b *Bundle, payload []byte, exclude bool) error {
 			return fmt.Errorf("domain section: bad uvarint at offset %d", pos)
 		}
 		pos += n
-		if pos+int(strLen) > len(payload) {
-			return fmt.Errorf("domain section: value overruns payload at offset %d", pos)
+		// uint64 compare so a hostile length that wraps int stays caught.
+		if strLen > uint64(len(payload)-pos) {
+			return fmt.Errorf("domain section: value (len=%d) overruns payload at offset %d", strLen, pos)
 		}
 		val := string(payload[pos : pos+int(strLen)])
 		pos += int(strLen)
@@ -133,7 +163,8 @@ func decodeSetTable(payload []byte) ([]string, error) {
 			return nil, fmt.Errorf("SetTable: bad uvarint at entry %d", i)
 		}
 		pos += n
-		if pos+int(nameLen) > len(payload) {
+		// uint64 compare so a hostile length that wraps int stays caught.
+		if nameLen > uint64(len(payload)-pos) {
 			return nil, fmt.Errorf("SetTable: name %d overruns payload (need %d, have %d)",
 				i, nameLen, len(payload)-pos)
 		}
