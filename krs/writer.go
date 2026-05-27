@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"log/slog"
 	"sort"
 	"strings"
 )
@@ -122,11 +123,20 @@ func encodeDomainBySet(sets []NamedSet, exclude bool) []byte {
 		}
 		seen := make(map[string]struct{}, len(src))
 		for _, d := range src {
-			d = strings.ToLower(strings.TrimSpace(d))
-			if d == "" {
+			// IDNA normalize: IDN → punycode, ASCII case-fold, strip
+			// trailing dot. Drops entries that aren't valid hostnames
+			// (underscores, wildcards, malformed labels) so reverseASCII
+			// only ever sees ASCII LDH bytes — multi-byte UTF-8 reversed
+			// bytewise is non-roundtrippable against real runtime queries.
+			ascii, ok := toASCIIDomain(d)
+			if !ok {
+				if strings.TrimSpace(d) != "" {
+					slog.Warn("krs: dropping non-IDNA-normalizable domain entry",
+						"set", s.Name, "entry", d)
+				}
 				continue
 			}
-			r := reverseASCII(d)
+			r := reverseASCII(ascii)
 			if _, dup := seen[r]; dup {
 				continue
 			}

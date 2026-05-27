@@ -405,6 +405,109 @@ func TestMatchDomain_TrailingDotTolerated(t *testing.T) {
 	}
 }
 
+// IDN round-trip: a bundle storing an IDN suffix must match the same host
+// whether the runtime supplies it as raw Unicode (Cyrillic/Han/Arabic) or
+// as the post-IDNA punycode form. Pre-fix, the writer's reverseASCII
+// byte-reverses multi-byte UTF-8 producing a non-roundtrippable string
+// that the punycode-form host could never byte-equal — IDN routing was
+// silently broken end-to-end.
+func TestMatchDomain_IDNRoundTrip(t *testing.T) {
+	b := &krs.Bundle{Sets: []krs.NamedSet{
+		{
+			Name: "ru-sites",
+			DomainSuffixes: []string{
+				// Mix of input forms the writer may receive: raw Unicode
+				// (citizenlab CSV / orphan list) and pre-punycoded (manual).
+				"почта.рф",                  // raw Cyrillic
+				"xn--80a1acny.xn--p1ai",     // same domain, already-punycode
+				"мвд.рф",                    // raw Cyrillic, no punycode dupe
+				"中国电信.中国",                   // raw Han
+				"weibo.com",                 // ASCII baseline
+			},
+			ExcludeDomains: []string{
+				"hk.почта.рф", // exclude in IDN form
+			},
+		},
+	}}
+	got := roundTrip(t, b)
+	set := &got.Sets[0]
+
+	cases := []struct {
+		host string
+		want bool
+	}{
+		// Unicode-form query hits Unicode-form rule.
+		{"почта.рф", true},
+		{"login.почта.рф", true},
+		// Punycode-form query (what real DNS pipeline delivers) must hit the
+		// same rule — this is the property the pre-fix code violated.
+		{"xn--80a1acny.xn--p1ai", true},
+		{"login.xn--80a1acny.xn--p1ai", true},
+		// Han.
+		{"中国电信.中国", true},
+		{"www.中国电信.中国", true},
+		{"www.xn--fiq64b88le07a.xn--fiqs8s", true},
+		// Other Cyrillic rule, no dupe.
+		{"мвд.рф", true},
+		{"www.мвд.рф", true},
+		{"xn--b1aew.xn--p1ai", true},
+		// ASCII still works.
+		{"weibo.com", true},
+		{"m.weibo.com", true},
+		// Excludes must work in IDN form too (both Unicode + punycode queries).
+		{"hk.почта.рф", false},
+		{"hk.xn--80a1acny.xn--p1ai", false},
+		// Negative: foreign IDN not in any rule.
+		{"unrelated.рф", false},
+		{"example.com", false},
+	}
+	for _, tc := range cases {
+		if got := set.MatchDomain(tc.host); got != tc.want {
+			t.Errorf("MatchDomain(%q) = %v, want %v", tc.host, got, tc.want)
+		}
+	}
+}
+
+// Invalid-domain entries from upstream must be dropped silently at compile
+// time, not silently corrupted into byte garbage by reverseASCII. Locks the
+// IDNA-strict-rejection contract: underscores, wildcards, ports, malformed
+// labels never reach the suffix table.
+func TestWriteBundle_DropsInvalidDomainEntries(t *testing.T) {
+	in := &krs.Bundle{Sets: []krs.NamedSet{
+		{
+			Name: "set",
+			DomainSuffixes: []string{
+				"weibo.com",             // legit
+				"_dns.google",           // underscore — IDNA-disallowed
+				"*.example.com",         // wildcard — not a domain
+				"example.com:443",       // port
+				"-foo.com",              // leading hyphen on label
+				"foo bar.com",           // whitespace
+				"почта.рф",              // legit IDN
+			},
+		},
+	}}
+	got := roundTrip(t, in)
+	set := &got.Sets[0]
+
+	// Legit entries match.
+	for _, h := range []string{"weibo.com", "m.weibo.com", "почта.рф",
+		"xn--80a1acny.xn--p1ai"} {
+		if !set.MatchDomain(h) {
+			t.Errorf("MatchDomain(%q) = false, want true", h)
+		}
+	}
+	// Invalid entries did NOT enter the bundle in any form (positive or
+	// corrupted). The hosts that share a label-suffix with them must not
+	// hit by accident.
+	for _, h := range []string{"_dns.google", "google", "example.com",
+		"foo.com", "bar.com"} {
+		if set.MatchDomain(h) {
+			t.Errorf("MatchDomain(%q) = true, want false (invalid entry leaked)", h)
+		}
+	}
+}
+
 func roundTrip(t *testing.T, in *krs.Bundle) *krs.Bundle {
 	t.Helper()
 	var buf bytes.Buffer
