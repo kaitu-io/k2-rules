@@ -96,21 +96,94 @@ android:
 # ── Windows (case-insensitive; compiler lowercases) ────────────────
 windows:
   apps:
-    # Top Chinese-ecosystem desktop apps. Conservative starting set —
-    # expand only after user-reported false-positives stay at zero.
+    # IM / messaging — Tier-1 CN desktop clients.
     - WeChat*         # WeChat.exe, WeChatStart.exe, WeChatAppEx.exe
-    - QQ*             # QQ.exe, QQMusic.exe, QQBrowser.exe
-    - DingTalk*       # DingTalk.exe
-    - Tencent*        # TencentMeeting.exe, TencentDocs.exe
+    - QQ*             # QQ.exe, QQMusic.exe, QQBrowser.exe, QQPCMgr.exe (腾讯电脑管家)
+    - DingTalk*       # 钉钉
+    - Tencent*        # TencentMeeting.exe (腾讯会议), TencentDocs.exe (腾讯文档)
+    - Feishu*         # 飞书 CN — Feishu.exe, FeishuRender.exe
+    - Lark*           # Lark.exe (飞书 intl/HK build — same backend, same CN PoPs)
+    - WXWork*         # 企业微信 (legacy binary name)
+    - WeCom*          # 企业微信 (current binary name)
+
+    # Payment / e-commerce
     - Alipay*
     - Alibaba*
+
+    # Office productivity — Kingsoft WPS is the dominant CN office suite.
+    # Module binaries are short (et / wpp) — pinned exact to avoid catching
+    # foreign apps that share the prefix.
+    - wps*            # wps.exe (Writer-equiv), wpscloudsvr.exe, wpscenter.exe
+    - et.exe          # WPS Spreadsheets — "et" is too generic for a glob
+    - wpp.exe         # WPS Presentation
+    - ksomisc*        # WPS misc helper
+
+    # Cloud storage
+    - BaiduNetdisk*   # 百度网盘
+    - aDrive*         # 阿里云盘
+    - 115Browser*     # 115 网盘
+
+    # Music — QQMusic already via QQ*.
+    - CloudMusic*     # 网易云音乐 (cloudmusic.exe)
+    - KuGou*          # 酷狗音乐
+    - KuWo*           # 酷我音乐
+
+    # Video streaming
+    - iQIYI*          # 爱奇艺 (newer client)
+    - QyClient*       # 爱奇艺 (legacy client name still on many installs)
+    - Youku*          # 优酷
+    - bilibili*       # 哔哩哔哩 / B站 (binary often lowercased)
+
+    # Browsers — CN-only ecosystem variants. Skip Chrome/Edge intl.
+    - SogouExplorer*  # 搜狗浏览器
+    - 360se*          # 360 安全浏览器
+    - 360chrome*      # 360 极速浏览器
+    - Maxthon*        # 傲游 — primarily CN userbase
+
+    # Input methods — Sogou is dominant; QQ Pinyin a distant second.
+    - Sogou*          # 搜狗输入法 (SogouCloud.exe, SGTool.exe, SgImeBroker.exe, ...)
+    - QQPinyin*       # QQ 拼音
+
+    # Security / system tools — almost exclusively CN-installed.
+    - 360Safe*        # 360 安全卫士
+    - 360tray*        # 360 系统托盘
+    - 360Sd*          # 360 杀毒
+    - 360Total*       # 360 Total Security
 
 # ── macOS (case-sensitive) ─────────────────────────────────────────
 darwin:
   apps:
+    # IM / messaging
     - WeChat*         # WeChat, WeChatHelper, WeChatAppEx
     - QQ*             # QQ
     - DingTalk*       # DingTalk
-    - Tencent*        # TencentMeeting
+    - Tencent*        # TencentMeeting, Tencent Docs
+    - Feishu*         # 飞书 (CN deployment)
+    - Lark*           # Lark (intl/HK build of Feishu)
+    - WXWork*         # 企业微信 (legacy)
+    - WeCom*          # 企业微信 (current Mac client)
+
+    # Payment / e-commerce
     - Alipay*
     - Alibaba*
+
+    # Office — Kingsoft WPS on Mac ships as /Applications/wpsoffice.app
+    - wpsoffice*      # WPS Office macOS main binary
+    - WPS*            # alternate capitalization seen on some builds
+
+    # Cloud storage
+    - BaiduNetdisk*   # 百度网盘
+    - aDrive*         # 阿里云盘 Mac client
+
+    # Music
+    - NeteaseMusic*   # 网易云音乐 (macOS bundle: NeteaseMusic)
+
+    # Video
+    - iQIYI*          # 爱奇艺
+    - QyClient*       # 爱奇艺 legacy
+    - Youku*          # 优酷
+    - Bilibili*       # 哔哩哔哩
+
+    # Input methods (macOS — IMK based, fewer process names to gate)
+    - Sogou*          # SogouInputPad, SogouInput
+    - QQInput*        # QQ 拼音 macOS
