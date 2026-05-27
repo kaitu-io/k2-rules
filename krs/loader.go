@@ -47,12 +47,20 @@ func Load(cacheDir string) ([]*Bundle, error) {
 
 // Index builds a name→*NamedSet lookup across all bundles.
 // On name collision, later bundles overwrite earlier ones (last wins) —
-// matches k2's existing rule.Index contract.
+// matches k2's existing rule.Index contract. Collisions emit a warn:
+// the behavior is intentional, but a silent overwrite would mask a
+// curation mistake (two bundles defining the same set name) that makes
+// runtime routing Load-order-dependent.
 func Index(bundles []*Bundle) map[string]*NamedSet {
 	idx := make(map[string]*NamedSet)
 	for _, b := range bundles {
 		for i := range b.Sets {
-			idx[b.Sets[i].Name] = &b.Sets[i]
+			name := b.Sets[i].Name
+			if _, dup := idx[name]; dup {
+				slog.Warn("krs: set name collision across bundles — last bundle wins",
+					"set", name)
+			}
+			idx[name] = &b.Sets[i]
 		}
 	}
 	return idx

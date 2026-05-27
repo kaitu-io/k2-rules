@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/kaitu-io/k2-rules/krs"
 	"gopkg.in/yaml.v3"
@@ -46,6 +48,14 @@ func loadAppBypassYAML(path string) (*krs.AppPatterns, error) {
 	}
 	if raw.Version != 2 {
 		return nil, fmt.Errorf("%s: unsupported version %d (want 2)", path, raw.Version)
+	}
+	// Pipeline-side region check (validator tool enforces the same at PR
+	// time, but a renamed-or-hand-edited file would otherwise silently
+	// ship the wrong region's bypass list — high-blast-radius misrouting).
+	expectRegion := strings.TrimSuffix(filepath.Base(path), ".yaml")
+	if raw.Region != expectRegion {
+		return nil, fmt.Errorf("%s: region %q must match filename %q",
+			path, raw.Region, expectRegion)
 	}
 	apps := &krs.AppPatterns{
 		Android: krs.AndroidPatterns{

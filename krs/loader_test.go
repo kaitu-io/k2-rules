@@ -2,8 +2,12 @@ package krs_test
 
 import (
 	"bytes"
+	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/kaitu-io/k2-rules/krs"
@@ -128,6 +132,87 @@ func TestIndex_MergesBundlesLastWins(t *testing.T) {
 	if !idx["telegram"].MatchDomain("telegram.org") {
 		t.Error("telegram: lookup failed")
 	}
+}
+
+// Last-wins is intentional, but a silent overwrite is an observability gap:
+// if two bundles ship the same set name (curation mistake, accidental
+// rename), routing becomes Load-order-dependent with no surface signal.
+// Index must emit a slog.Warn so operators can spot the collision.
+func TestIndex_LogsWarnOnNameCollision(t *testing.T) {
+	rec := installRecordingHandler(t)
+
+	b1 := &krs.Bundle{Sets: []krs.NamedSet{{Name: "geoip-cn"}, {Name: "telegram"}}}
+	b2 := &krs.Bundle{Sets: []krs.NamedSet{{Name: "geoip-cn"}}} // collides
+	_ = krs.Index([]*krs.Bundle{b1, b2})
+
+	if !rec.hasMessage("geoip-cn", slog.LevelWarn) {
+		t.Errorf("expected slog.Warn mentioning collision on 'geoip-cn', got messages: %v",
+			rec.snapshot())
+	}
+	if rec.hasMessage("telegram", slog.LevelWarn) {
+		t.Errorf("unexpected warn for non-colliding 'telegram': %v", rec.snapshot())
+	}
+}
+
+// recordingHandler captures slog records so tests can assert observability
+// behavior (warns are emitted) without parsing handler-formatted text.
+type recordingHandler struct {
+	mu      sync.Mutex
+	records []slog.Record
+}
+
+func (h *recordingHandler) Enabled(context.Context, slog.Level) bool { return true }
+func (h *recordingHandler) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.records = append(h.records, r.Clone())
+	return nil
+}
+func (h *recordingHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *recordingHandler) WithGroup(string) slog.Handler      { return h }
+
+func (h *recordingHandler) snapshot() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make([]string, 0, len(h.records))
+	for _, r := range h.records {
+		out = append(out, r.Level.String()+": "+r.Message)
+	}
+	return out
+}
+
+func (h *recordingHandler) hasMessage(substr string, level slog.Level) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, r := range h.records {
+		if r.Level == level && strings.Contains(r.Message, substr) {
+			return true
+		}
+		// Also scan attrs for the substring (set name often comes through as attr value).
+		found := false
+		r.Attrs(func(a slog.Attr) bool {
+			if strings.Contains(a.Value.String(), substr) {
+				found = true
+				return false
+			}
+			return true
+		})
+		if found && r.Level == level {
+			return true
+		}
+	}
+	return false
+}
+
+// installRecordingHandler swaps slog default with a recorder for the duration
+// of the test. Restored via t.Cleanup.
+func installRecordingHandler(t *testing.T) *recordingHandler {
+	t.Helper()
+	rec := &recordingHandler{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(rec))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return rec
 }
 
 func writeBundleFile(t *testing.T, dir, name string, b *krs.Bundle) {

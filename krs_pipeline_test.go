@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kaitu-io/k2-rules/krs"
@@ -48,6 +49,33 @@ darwin:
 	}
 	if len(apps.Darwin.Apps) != 1 {
 		t.Errorf("darwin.apps: %+v", apps.Darwin.Apps)
+	}
+}
+
+// YAML region field must match the filename region. The validator tool
+// already enforces this at PR time, but the pipeline trusts whatever lands
+// on disk and would silently ship ir.yaml's bypass list inside cn.krs if
+// someone renamed the file or hand-edited region. Double-check at load
+// time so a misnamed file fails the build instead of misrouting users.
+func TestLoadAppBypassYAML_RejectsRegionMismatch(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cn.yaml") // filename says cn
+	body := `
+version: 2
+region: ir
+android:
+  installers:
+    - com.farsitel.bazaar
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := loadAppBypassYAML(path)
+	if err == nil {
+		t.Fatal("expected region-mismatch error, got nil")
+	}
+	if !strings.Contains(err.Error(), "region") {
+		t.Errorf("expected error to mention 'region', got: %v", err)
 	}
 }
 
