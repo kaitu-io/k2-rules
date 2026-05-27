@@ -110,8 +110,12 @@ jobs:
           git checkout release
 
           # Replace all contents with the freshly-built artifact set.
-          # Release branch carries .k2b + .krs + tarball + VERSION; no source.
+          # Release branch carries .k2b + .krs + manifest.json + tarball + VERSION; no source.
+          # Wipe both tracked (git rm) and untracked (workspace leftovers from
+          # earlier build steps — dist/, k2-rules-gen — that master ignores
+          # via .gitignore but release branch does not).
           git rm -rf . 2>/dev/null || true
+          rm -rf dist k2-rules-gen
           cp /tmp/release-artifacts/* .
 
           git add .
