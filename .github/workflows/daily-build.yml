@@ -21,6 +21,9 @@ jobs:
       - name: Lint app-bypass YAML presets
         run: go run ./tools/validate-app-bypass app-bypass
 
+      - name: Run unit tests
+        run: go test ./...
+
       - name: Build compiler
         run: go build -o k2-rules-gen .
 

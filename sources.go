@@ -276,6 +276,29 @@ var countries = []country{
 	{Code: "uz", Name: "Uzbekistan", Services: citizenlabBasic("uz")},
 }
 
+// tencentOverseasServices builds the tencent-overseas.krs standalone bundle:
+// the full AS132203 (TENCENT-NET-AP-CN) CIDR list — Tencent's overseas PoPs
+// (Singapore/HK/JP). Pure data, no action: the client references this set by
+// name (match.names) and assigns `reject` ONLY in cn-bypass mode, so the app
+// fails over to mainland Tencent IPs (which the cn-direct route routes direct).
+// Standalone (not a set inside cn.krs) so region:'cn' expansion does NOT sweep
+// it into the direct route. Ships unfiltered; route order does the mainland
+// carve-out (geoip-cn wins direct first). See docs/superpowers/plans for the
+// full rationale (WeChat HTTPDNS cross-border routing fix).
+var tencentOverseasServices = []service{
+	{
+		Name:   "tencent-overseas",
+		IPURLs: []string{"https://raw.githubusercontent.com/ipverse/asn-ip/master/as/132203/ipv4-aggregated.txt"},
+	},
+}
+
+// tencentOverseasAnchors are the observed overseas-Tencent business IPs that
+// triggered the WeChat HTTPDNS cross-border routing problem. The daily build
+// asserts AS132203 still covers them (validateTencentOverseas) so an upstream
+// format change or ASN re-allocation fails CI loudly instead of shipping a
+// reject set that silently no longer matches the IPs we care about.
+var tencentOverseasAnchors = []string{"43.159.235.61", "43.153.236.237"}
+
 // citizenlabBasic returns the default two-service recipe for a country with
 // no v2fly coverage: geoip + citizenlab CSV. Used for the long tail of
 // Tier 1/2 countries where curated open-source data is sparse.

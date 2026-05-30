@@ -58,6 +58,29 @@ func main() {
 		}
 	}
 
+	// Build tencent-overseas standalone bundle (AS132203 → client reject route).
+	// Single IP-only set named "tencent-overseas", no app patterns. Referenced
+	// by the client via match.names + via:reject in cn-bypass mode only. Skipped
+	// under -country for faster local iteration. Fail-closed: if AS132203 comes
+	// back empty or no longer covers the anchor IPs, abort the build so the last
+	// good release stays live instead of shipping a silent no-op reject set.
+	if *onlyCountry == "" {
+		log.Println("=== building tencent-overseas.krs ===")
+		tovSets, err := buildSets(tencentOverseasServices, v2flyDir)
+		if err != nil {
+			log.Fatalf("build tencent-overseas: %v", err)
+		}
+		if len(tovSets) != 1 {
+			log.Fatalf("tencent-overseas: expected 1 set, got %d", len(tovSets))
+		}
+		if err := validateTencentOverseas(tovSets[0].CIDRs, tencentOverseasAnchors); err != nil {
+			log.Fatalf("tencent-overseas validation failed: %v", err)
+		}
+		if err := writeKRSBundle(filepath.Join(*outDir, "tencent-overseas.krs"), tovSets, nil); err != nil {
+			log.Fatalf("write tencent-overseas.krs: %v", err)
+		}
+	}
+
 	// Build per-country bundles. Each country gets:
 	//   <cc>-direct.k2b  — legacy routing-only bundle
 	//   <cc>.krs         — unified routing + app patterns (current format)
@@ -129,6 +152,40 @@ func runPipe(cmd string, stdin io.Reader) error {
 	c.Stdout = os.Stderr
 	c.Stderr = os.Stderr
 	return c.Run()
+}
+
+// validateTencentOverseas fail-closes the daily build. buildSets WARN-continues
+// on a failed source fetch, leaving CIDRs empty; writing that would publish a
+// 0-CIDR tencent-overseas.krs and silently turn the client's reject route into
+// a no-op. It also guards against AS132203 dropping the IPs we actually observed
+// (upstream re-aggregation / re-allocation). Returns the first failure.
+func validateTencentOverseas(cidrs []string, anchors []string) error {
+	if len(cidrs) == 0 {
+		return fmt.Errorf("tencent-overseas set is empty (AS132203 fetch failed?)")
+	}
+	prefixes := make([]netip.Prefix, 0, len(cidrs))
+	for _, c := range cidrs {
+		if p, err := netip.ParsePrefix(c); err == nil {
+			prefixes = append(prefixes, p)
+		}
+	}
+	for _, a := range anchors {
+		ip, err := netip.ParseAddr(a)
+		if err != nil {
+			return fmt.Errorf("invalid anchor %q: %w", a, err)
+		}
+		covered := false
+		for _, p := range prefixes {
+			if p.Contains(ip) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			return fmt.Errorf("tencent-overseas missing anchor %s (AS132203 changed?)", a)
+		}
+	}
+	return nil
 }
 
 // buildSets builds BundleSet data for a list of services.

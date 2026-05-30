@@ -114,6 +114,30 @@ func TestFetchDomainList_InlineComments(t *testing.T) {
 	}
 }
 
+func TestValidateTencentOverseas(t *testing.T) {
+	anchors := []string{"43.159.235.61", "43.153.236.237"}
+
+	t.Run("covers anchors via aggregated prefixes", func(t *testing.T) {
+		cidrs := []string{"43.159.128.0/17", "43.153.0.0/16"}
+		if err := validateTencentOverseas(cidrs, anchors); err != nil {
+			t.Fatalf("want nil, got %v", err)
+		}
+	})
+
+	t.Run("empty set fails closed", func(t *testing.T) {
+		if err := validateTencentOverseas(nil, anchors); err == nil {
+			t.Fatal("want error for empty set, got nil")
+		}
+	})
+
+	t.Run("non-empty but missing an anchor fails", func(t *testing.T) {
+		cidrs := []string{"43.159.128.0/17"} // covers .159 anchor, not .153
+		if err := validateTencentOverseas(cidrs, anchors); err == nil {
+			t.Fatal("want error for missing anchor, got nil")
+		}
+	})
+}
+
 func TestExtractHost(t *testing.T) {
 	tests := []struct {
 		input string
