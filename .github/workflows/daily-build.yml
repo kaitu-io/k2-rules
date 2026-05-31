@@ -39,10 +39,33 @@ jobs:
           # During the ~6 month transition both ship together; clients
           # pick whichever they know how to read.
           cd dist
+          # all.krs.tar.gz: the single .krs archive the embed/build-fetch and the
+          # embed-aware client consume. Phase A: k2-rules.tar.gz UNCHANGED (still
+          # carries .krs) so pre-embed clients keep their source. Phase B (later)
+          # strips .krs from k2-rules.tar.gz — see embedded-rules spec.
+          tar -czf all.krs.tar.gz *.krs
           tar -czf k2-rules.tar.gz *.k2b *.krs
-          ls -lh k2-rules.tar.gz
-          printf '%s sha256:%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(sha256sum k2-rules.tar.gz | awk '{print $1}')" > VERSION
+          ls -lh all.krs.tar.gz k2-rules.tar.gz
+          # VERSION/change-detection keys on all.krs.tar.gz (the .krs set is what
+          # matters now; .k2b is frozen legacy).
+          printf '%s sha256:%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(sha256sum all.krs.tar.gz | awk '{print $1}')" > VERSION
           cat VERSION
+
+      - name: Verify archive split
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          # all.krs.tar.gz must contain every .krs and zero .k2b.
+          krs_in_all=$(tar -tzf all.krs.tar.gz | grep -c '\.krs$' || true)
+          k2b_in_all=$(tar -tzf all.krs.tar.gz | grep -c '\.k2b$' || true)
+          echo "all.krs.tar.gz: ${krs_in_all} .krs, ${k2b_in_all} .k2b"
+          [ "$krs_in_all" -ge 1 ] || { echo "FAIL: all.krs.tar.gz has no .krs"; exit 1; }
+          [ "$k2b_in_all" -eq 0 ] || { echo "FAIL: all.krs.tar.gz must not contain .k2b"; exit 1; }
+          # The reject feature depends on tencent-overseas.krs being in the archive.
+          tar -tzf all.krs.tar.gz | grep -q '^tencent-overseas\.krs$' \
+            || tar -tzf all.krs.tar.gz | grep -q '/tencent-overseas\.krs$' \
+            || { echo "FAIL: tencent-overseas.krs missing from all.krs.tar.gz"; exit 1; }
+          echo "OK: archive split verified"
 
       - name: Check for changes
         id: diff
@@ -91,6 +114,7 @@ jobs:
             dist/*.k2b \
             dist/*.krs \
             dist/manifest.json \
+            dist/all.krs.tar.gz \
             dist/k2-rules.tar.gz \
             dist/VERSION
 
@@ -103,7 +127,7 @@ jobs:
           # manifest.json is included so jsdelivr can serve it from @release;
           # the GitHub Release asset upload is the authoritative copy.
           mkdir -p /tmp/release-artifacts
-          cp dist/*.k2b dist/*.krs dist/manifest.json dist/k2-rules.tar.gz dist/VERSION /tmp/release-artifacts/
+          cp dist/*.k2b dist/*.krs dist/manifest.json dist/all.krs.tar.gz dist/k2-rules.tar.gz dist/VERSION /tmp/release-artifacts/
 
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
@@ -137,7 +161,7 @@ jobs:
           # so the four POPs (cdn / fastly / testingcf / gcore) revalidate against
           # GitHub on next client fetch. Free public service, no auth required.
           base="https://purge.jsdelivr.net/gh/kaitu-io/k2-rules@release"
-          paths=(k2-rules.tar.gz VERSION manifest.json)
+          paths=(all.krs.tar.gz k2-rules.tar.gz VERSION manifest.json)
           for f in dist/*.k2b; do paths+=("$(basename "$f")"); done
           for f in dist/*.krs; do paths+=("$(basename "$f")"); done
           for p in "${paths[@]}"; do
