@@ -89,6 +89,55 @@ func TestDiskBundle_ParityWithReadBundle(t *testing.T) {
 	}
 }
 
+// TestDiskBundle_Parity_IDNAnd4in6 covers two edges the main parity test omits:
+// IDN hosts (stored as punycode, queried via ReversedParents' IDNA fold) and
+// 4-in-6 addresses (MatchIP must also consult the v4 section). Disk and heap
+// readers must agree on both.
+func TestDiskBundle_Parity_IDNAnd4in6(t *testing.T) {
+	b := &Bundle{Sets: []NamedSet{{
+		Name:           "cn",
+		DomainSuffixes: []string{"例え.jp", "测试.中国", "ascii.example"},
+		CIDRs:          []string{"1.2.3.0/24", "2001:db8::/32"},
+	}}}
+	var buf bytes.Buffer
+	if err := WriteBundle(&buf, b); err != nil {
+		t.Fatal(err)
+	}
+	heap, err := ReadBundle(buf.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := Open(writeTmpBundle(t, b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	hs := &heap.Sets[0]
+	ds := db.Sets()[0]
+	for _, host := range []string{
+		"例え.jp", "www.例え.jp", "测试.中国", "ascii.example",
+		"xn--r8jz45g.jp", // punycode of 例え.jp — must match the same rule
+		"notmatched.jp", "例えf.jp",
+	} {
+		parents := ReversedParents(host)
+		if got, want := ds.MatchDomainReversed(parents), hs.MatchDomainReversed(parents); got != want {
+			t.Errorf("domain %q: disk=%v heap=%v", host, got, want)
+		}
+	}
+	for _, ipStr := range []string{
+		"1.2.3.4",            // v4 direct hit
+		"::ffff:1.2.3.4",     // 4-in-6 form of the same address — must hit v4 section
+		"2001:db8::1",        // v6 hit
+		"::ffff:9.9.9.9",     // 4-in-6 miss
+	} {
+		addr := netip.MustParseAddr(ipStr)
+		if got, want := ds.MatchIP(addr), hs.MatchIP(addr); got != want {
+			t.Errorf("ip %q: disk=%v heap=%v", ipStr, got, want)
+		}
+	}
+}
+
 func TestOpen_BadMagic(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "bad.krs")
 	if err := os.WriteFile(p, []byte("NOPExxxx"), 0o644); err != nil {
