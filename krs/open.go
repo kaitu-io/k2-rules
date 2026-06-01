@@ -1,8 +1,10 @@
 package krs
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
+	"net/netip"
 )
 
 // DiskBundle is a read-only, mmap-backed bundle. Resident dirty heap is
@@ -15,9 +17,8 @@ type DiskBundle struct {
 	sets  []diskSet
 }
 
-// diskSet holds per-set mmap sub-slices. It implements Matcher once the match
-// methods are added (Task 6: MatchDomainReversed, MatchIP).
-// Match methods are added in Task 6.
+// diskSet holds per-set mmap sub-slices and implements Matcher
+// (MatchDomainReversed, MatchIP) by searching directly on the mapped bytes.
 type diskSet struct {
 	name    string
 	suffix  domainBlock
@@ -168,6 +169,139 @@ func (db *DiskBundle) bindDomain(secs map[uint16][]byte, payID, idxID uint16, ex
 		}
 	}
 	return nil
+}
+
+// Sets exposes per-set matchers (pointers into db; valid until Close). Intended
+// to be called once at setup — it allocates a fresh []Matcher per call, so do
+// not call it on the per-lookup hot path.
+func (db *DiskBundle) Sets() []Matcher {
+	out := make([]Matcher, len(db.sets))
+	for i := range db.sets {
+		out[i] = &db.sets[i]
+	}
+	return out
+}
+
+var _ Matcher = (*diskSet)(nil)
+
+// MatchDomainReversed: excludes take priority over suffixes.
+func (s *diskSet) MatchDomainReversed(reversedParents []string) bool {
+	if s.exclude.matchReversed(reversedParents) {
+		return false
+	}
+	return s.suffix.matchReversed(reversedParents)
+}
+
+// matchReversed binary-searches this set's offset table for an exact hit on any
+// reversed parent suffix. Allocation-free: entry values are compared as mmap
+// bytes via cmpBS without materializing strings.
+func (b *domainBlock) matchReversed(parents []string) bool {
+	n := len(b.offsets) / 4
+	if n == 0 {
+		return false
+	}
+	for _, rq := range parents {
+		lo, hi := 0, n
+		for lo < hi {
+			mid := (lo + hi) / 2
+			if cmpBS(b.entryBytes(mid), rq) < 0 {
+				lo = mid + 1
+			} else {
+				hi = mid
+			}
+		}
+		if lo < n && cmpBS(b.entryBytes(lo), rq) == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// entryBytes returns the reversed-domain value bytes of the k-th entry as a
+// slice into the mmap (no allocation).
+func (b *domainBlock) entryBytes(k int) []byte {
+	off := binary.LittleEndian.Uint32(b.offsets[k*4:])
+	p := b.payload[off+2:] // skip u16 set_idx
+	l, m := binary.Uvarint(p)
+	return p[m : m+int(l)]
+}
+
+// cmpBS lexicographically compares a byte slice with a string, no allocation.
+// It exists alongside bytes.Compare because the query is a string and comparing
+// it via bytes.Compare would require materializing a []byte (an allocation).
+func cmpBS(b []byte, s string) int {
+	n := len(b)
+	if len(s) < n {
+		n = len(s)
+	}
+	for i := 0; i < n; i++ {
+		if b[i] != s[i] {
+			if b[i] < s[i] {
+				return -1
+			}
+			return 1
+		}
+	}
+	switch {
+	case len(b) < len(s):
+		return -1
+	case len(b) > len(s):
+		return 1
+	default:
+		return 0
+	}
+}
+
+// MatchIP mirrors NamedSet.MatchIP semantics (incl. 4-in-6) over mmap ranges.
+func (s *diskSet) MatchIP(addr netip.Addr) bool {
+	if addr.Is4() {
+		b := addr.As4()
+		return s.v4.contains(b[:])
+	}
+	if addr.Is6() {
+		b := addr.As16()
+		// Handle 4-in-6 addresses by also checking v4 section.
+		if addr.Is4In6() {
+			b4 := addr.Unmap().As4()
+			if s.v4.contains(b4[:]) {
+				return true
+			}
+		}
+		return s.v6.contains(b[:])
+	}
+	return false
+}
+
+// contains binary-searches the fixed-width sorted ranges in place on the mmap.
+func (blk *ipBlock) contains(raw []byte) bool {
+	if blk.addrLen == 0 || len(raw) != blk.addrLen {
+		return false
+	}
+	entrySize := 2 + 2*blk.addrLen
+	n := len(blk.payload) / entrySize
+	startAt := func(i int) []byte {
+		o := i * entrySize
+		return blk.payload[o+2 : o+2+blk.addrLen]
+	}
+	endAt := func(i int) []byte {
+		o := i * entrySize
+		return blk.payload[o+2+blk.addrLen : o+entrySize]
+	}
+	// Find largest start <= raw via binary search.
+	lo, hi := 0, n
+	for lo < hi {
+		mid := (lo + hi) / 2
+		if bytes.Compare(startAt(mid), raw) > 0 {
+			hi = mid
+		} else {
+			lo = mid + 1
+		}
+	}
+	idx := lo
+	if idx == 0 {
+		return false
+	}
+	return bytes.Compare(endAt(idx-1), raw) >= 0
 }
 
 // bindIP splits a fixed-width IP section (sorted by set_idx) into per-set

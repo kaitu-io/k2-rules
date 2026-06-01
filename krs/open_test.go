@@ -2,6 +2,7 @@ package krs
 
 import (
 	"bytes"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"testing"
@@ -35,6 +36,56 @@ func TestOpen_NamesAndClose(t *testing.T) {
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
+	}
+}
+
+func TestDiskBundle_ParityWithReadBundle(t *testing.T) {
+	b := &Bundle{Sets: []NamedSet{
+		{
+			Name:           "cn",
+			DomainSuffixes: []string{"qq.com", "weixin.qq.com", "taobao.com"},
+			ExcludeDomains: []string{"intl.taobao.com"},
+			CIDRs:          []string{"1.2.3.0/24", "10.0.0.0/8", "2001:db8::/32"},
+		},
+		{Name: "os", DomainSuffixes: []string{"google.com"}, CIDRs: []string{"8.8.8.0/24"}},
+	}}
+	var buf bytes.Buffer
+	if err := WriteBundle(&buf, b); err != nil {
+		t.Fatal(err)
+	}
+	heap, err := ReadBundle(buf.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := Open(writeTmpBundle(t, b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	disk := db.Sets()
+
+	domains := []string{"qq.com", "weixin.qq.com", "a.weixin.qq.com",
+		"taobao.com", "intl.taobao.com", "deep.intl.taobao.com",
+		"google.com", "evil.com", "qq.com.evil.com"}
+	ips := []string{"1.2.3.4", "1.2.4.1", "10.255.0.1", "8.8.8.8", "9.9.9.9",
+		"2001:db8::1", "2001:dead::1"}
+	for si := range heap.Sets {
+		hs := &heap.Sets[si]
+		ds := disk[si]
+		for _, host := range domains {
+			parents := ReversedParents(host)
+			if hs.MatchDomainReversed(parents) != ds.MatchDomainReversed(parents) {
+				t.Errorf("set %d domain %q: heap=%v disk=%v", si, host,
+					hs.MatchDomainReversed(parents), ds.MatchDomainReversed(parents))
+			}
+		}
+		for _, ipStr := range ips {
+			addr := netip.MustParseAddr(ipStr)
+			if hs.MatchIP(addr) != ds.MatchIP(addr) {
+				t.Errorf("set %d ip %q: heap=%v disk=%v", si, ipStr,
+					hs.MatchIP(addr), ds.MatchIP(addr))
+			}
+		}
 	}
 }
 
