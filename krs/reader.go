@@ -103,6 +103,8 @@ func decodeSection(b *Bundle, typeID uint16, payload []byte) error {
 		return decodeDomainBySet(b, payload, true)
 	case typeAndroidInstallers, typeAndroidApps, typeWindowsApps, typeDarwinApps:
 		return decodeAppSection(b, typeID, payload)
+	case typeDomainSuffixIndex, typeDomainExcludeIndex:
+		return nil // index sections are consumed by Open(), ignored by ReadBundle
 	default:
 		slog.Warn("krs: unknown section TypeID, skipping",
 			"type_id", fmt.Sprintf("0x%04x", typeID),

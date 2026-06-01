@@ -22,14 +22,18 @@ const (
 	typeIPv6RangesBySet    uint16 = 0x0011
 	typeDomainSuffixBySet  uint16 = 0x0012
 	typeDomainExcludeBySet uint16 = 0x0013
+	typeDomainSuffixIndex  uint16 = 0x0014 // offset index for 0x0012
+	typeDomainExcludeIndex uint16 = 0x0015 // offset index for 0x0013
 )
 
 // WriteBundle serializes b to w in .krs format.
 //
 // Layout: header (8 bytes) | section index (count × 10 bytes) | payloads.
-// Sections are emitted in TypeID ascending order so writer output is
-// deterministic for a given input (round-trip and byte-exact tests rely
-// on this; readers may not assume it).
+// Sections are emitted in a fixed, deterministic order (each domain index
+// section immediately follows its payload sibling, so the order is not
+// strictly TypeID-ascending) so writer output is deterministic for a given
+// input (round-trip and byte-exact tests rely on this; readers may not
+// assume any order — the section index is authoritative).
 func WriteBundle(w io.Writer, b *Bundle) error {
 	ver := b.Version
 	if ver == 0 {
@@ -77,8 +81,9 @@ type section struct {
 	payload []byte
 }
 
-// collectSections builds the (sorted) section list for a bundle.
-// Order: TypeID ascending.
+// collectSections builds the section list for a bundle in a fixed,
+// deterministic order: SetTable, IPv4, IPv6, then each domain payload
+// immediately followed by its offset-index section, then app sections.
 //
 // Empty payloads are skipped — a bundle with named sets but no domain
 // data emits only the SetTable, not an empty DomainSuffixBySet section.
@@ -93,24 +98,26 @@ func collectSections(b *Bundle) []section {
 	if p := encodeIPRangesBySet(b.Sets, 16); len(p) > 0 {
 		out = append(out, section{typeIPv6RangesBySet, p})
 	}
-	if p := encodeDomainBySet(b.Sets, false); len(p) > 0 {
-		out = append(out, section{typeDomainSuffixBySet, p})
+	if pay, idx := encodeDomainSection(b.Sets, false); len(pay) > 0 {
+		out = append(out, section{typeDomainSuffixBySet, pay})
+		out = append(out, section{typeDomainSuffixIndex, idx})
 	}
-	if p := encodeDomainBySet(b.Sets, true); len(p) > 0 {
-		out = append(out, section{typeDomainExcludeBySet, p})
+	if pay, idx := encodeDomainSection(b.Sets, true); len(pay) > 0 {
+		out = append(out, section{typeDomainExcludeBySet, pay})
+		out = append(out, section{typeDomainExcludeIndex, idx})
 	}
 	out = append(out, collectAppSections(b.Apps)...)
 	return out
 }
 
-// encodeDomainBySet serializes domains from all sets into one payload.
-//
-// Entries: [u16 set_idx][uvarint(len)][reversed-lower utf-8] repeated.
-// Sort: (set_idx ASC, value ASC). Per-set dedup. Empty/whitespace skipped.
-// No count prefix — reader scans to section Length.
+// encodeDomainSection serializes domains from all sets into a payload plus its
+// offset index. Payload entries: [u16 set_idx][uvarint len][reversed-lower
+// utf-8], sorted (set_idx ASC, value ASC), per-set dedup. Index layout:
+// [u16 setCount][{u32 entryStart, u32 entryCount} × setCount][u32 offset × N],
+// offsets relative to payload start, same order as the payload.
 //
 // exclude=true reads from NamedSet.ExcludeDomains instead of DomainSuffixes.
-func encodeDomainBySet(sets []NamedSet, exclude bool) []byte {
+func encodeDomainSection(sets []NamedSet, exclude bool) (payload, index []byte) {
 	type entry struct {
 		setIdx uint16
 		value  string // reversed-lower
@@ -144,6 +151,9 @@ func encodeDomainBySet(sets []NamedSet, exclude bool) []byte {
 			entries = append(entries, entry{uint16(i), r})
 		}
 	}
+	if len(entries) == 0 {
+		return nil, nil
+	}
 	sort.Slice(entries, func(i, j int) bool {
 		if entries[i].setIdx != entries[j].setIdx {
 			return entries[i].setIdx < entries[j].setIdx
@@ -151,17 +161,39 @@ func encodeDomainBySet(sets []NamedSet, exclude bool) []byte {
 		return entries[i].value < entries[j].value
 	})
 
-	var buf bytes.Buffer
+	counts := make([]uint32, len(sets))
+	offsets := make([]uint32, len(entries))
+	var pbuf bytes.Buffer
 	var idxb [2]byte
 	var vb [binary.MaxVarintLen64]byte
-	for _, e := range entries {
+	for k, e := range entries {
+		offsets[k] = uint32(pbuf.Len())
 		binary.LittleEndian.PutUint16(idxb[:], e.setIdx)
-		buf.Write(idxb[:])
+		pbuf.Write(idxb[:])
 		n := binary.PutUvarint(vb[:], uint64(len(e.value)))
-		buf.Write(vb[:n])
-		buf.WriteString(e.value)
+		pbuf.Write(vb[:n])
+		pbuf.WriteString(e.value)
+		counts[e.setIdx]++
 	}
-	return buf.Bytes()
+
+	var ibuf bytes.Buffer
+	var u16b [2]byte
+	var u32b [4]byte
+	binary.LittleEndian.PutUint16(u16b[:], uint16(len(sets)))
+	ibuf.Write(u16b[:])
+	var start uint32
+	for _, c := range counts {
+		binary.LittleEndian.PutUint32(u32b[:], start)
+		ibuf.Write(u32b[:])
+		binary.LittleEndian.PutUint32(u32b[:], c)
+		ibuf.Write(u32b[:])
+		start += c
+	}
+	for _, o := range offsets {
+		binary.LittleEndian.PutUint32(u32b[:], o)
+		ibuf.Write(u32b[:])
+	}
+	return pbuf.Bytes(), ibuf.Bytes()
 }
 
 // reverseASCII reverses a byte string. Safe for domain names (LDH-only after

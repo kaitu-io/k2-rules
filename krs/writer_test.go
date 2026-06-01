@@ -56,14 +56,16 @@ func TestWriteBundle_OneSet_NoData(t *testing.T) {
 	}
 }
 
-// One set with one domain emits SetTable + DomainSuffixBySet, both in
-// TypeID-ascending order. Domain is reversed and lowercased at compile time.
+// One set with one domain emits SetTable + DomainSuffixBySet + DomainSuffixIndex.
+// Each domain index section immediately follows its payload sibling (here that
+// also happens to be TypeID-ascending). Domain is reversed and lowercased at compile time.
 //
 // Layout:
 //
-//	[8B hdr] [10B SetTable index] [10B DomainSuffix index]
+//	[8B hdr] [10B SetTable index] [10B DomainSuffix index] [10B DomainSuffixIndex index]
 //	[SetTable: u16(1) + uvarint(6) + "google"] = 9B
 //	[DomainSuffix: u16(set_idx=0) + uvarint(10) + "moc.elgoog"] = 13B
+//	[DomainSuffixIndex: u16(1) + {u32(0),u32(1)} + u32(0)] = 14B
 func TestWriteBundle_DomainSuffix(t *testing.T) {
 	var buf bytes.Buffer
 	b := &krs.Bundle{Sets: []krs.NamedSet{
@@ -72,17 +74,27 @@ func TestWriteBundle_DomainSuffix(t *testing.T) {
 	if err := krs.WriteBundle(&buf, b); err != nil {
 		t.Fatalf("WriteBundle: %v", err)
 	}
+	// Header+index = 8 + 3×10 = 38 bytes. Payloads at off 38, 47, 60.
 	want := []byte{
-		// Header
-		'K', '2', 'R', 'L', 0x01, 0x00, 0x02, 0x00,
-		// Index entry 0: SetTable (0x0001), off=28, len=9
-		0x01, 0x00, 28, 0, 0, 0, 9, 0, 0, 0,
-		// Index entry 1: DomainSuffixBySet (0x0012), off=37, len=13
-		0x12, 0x00, 37, 0, 0, 0, 13, 0, 0, 0,
-		// SetTable payload
+		// Header: magic, version=1, sectionCount=3
+		'K', '2', 'R', 'L', 0x01, 0x00, 0x03, 0x00,
+		// Index entry 0: SetTable (0x0001), off=38, len=9
+		0x01, 0x00, 38, 0, 0, 0, 9, 0, 0, 0,
+		// Index entry 1: DomainSuffixBySet (0x0012), off=47, len=13
+		0x12, 0x00, 47, 0, 0, 0, 13, 0, 0, 0,
+		// Index entry 2: DomainSuffixIndex (0x0014), off=60, len=14
+		0x14, 0x00, 60, 0, 0, 0, 14, 0, 0, 0,
+		// SetTable payload: count=1, uvarint(6), "google"
 		0x01, 0x00, 6, 'g', 'o', 'o', 'g', 'l', 'e',
 		// DomainSuffix payload: set_idx=0, uvarint(10), "moc.elgoog"
 		0x00, 0x00, 10, 'm', 'o', 'c', '.', 'e', 'l', 'g', 'o', 'o', 'g',
+		// DomainSuffixIndex payload:
+		//   u16 setCount=1
+		//   {u32 start=0, u32 count=1}   (set 0 has 1 entry starting at offset 0)
+		//   u32 offset=0                  (entry 0 at payload byte 0)
+		0x01, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00,
 	}
 	if !bytes.Equal(buf.Bytes(), want) {
 		t.Errorf("WriteBundle domain-suffix:\n got: %x\nwant: %x", buf.Bytes(), want)
@@ -310,6 +322,69 @@ func TestRoundTrip_SemanticEquivalence_AllFeatures(t *testing.T) {
 	// Case sensitivity locked: Darwin must NOT match lowercased input.
 	if _, ok := out.Apps.MatchDarwinProcess("wechat"); ok {
 		t.Error("MatchDarwinProcess(wechat): matched lowercase, expected case-sensitive miss")
+	}
+}
+
+// sectionPayload returns the payload bytes of the first section with typeID.
+func sectionPayload(t *testing.T, data []byte, typeID uint16) []byte {
+	t.Helper()
+	cnt := int(binary.LittleEndian.Uint16(data[6:8]))
+	for i := 0; i < cnt; i++ {
+		e := data[8+i*10:]
+		if binary.LittleEndian.Uint16(e[0:2]) == typeID {
+			off := binary.LittleEndian.Uint32(e[2:6])
+			ln := binary.LittleEndian.Uint32(e[6:10])
+			return data[off : off+ln]
+		}
+	}
+	t.Fatalf("section 0x%04x not found", typeID)
+	return nil
+}
+
+// TestDomainIndexSection_OffsetsPointAtEntries verifies that the emitted
+// domain offset-index section (TypeID 0x0014) has a directory and offset
+// table that each point to a valid entry in the DomainSuffixBySet payload
+// (TypeID 0x0012).
+func TestDomainIndexSection_OffsetsPointAtEntries(t *testing.T) {
+	b := &krs.Bundle{Sets: []krs.NamedSet{
+		{Name: "a", DomainSuffixes: []string{"google.com", "github.com"}},
+		{Name: "b", DomainSuffixes: []string{"example.org"}},
+	}}
+	var buf bytes.Buffer
+	if err := krs.WriteBundle(&buf, b); err != nil {
+		t.Fatal(err)
+	}
+	data := buf.Bytes()
+	// locate the two sections by TypeID via the section index
+	payload := sectionPayload(t, data, 0x0012) // typeDomainSuffixBySet
+	index := sectionPayload(t, data, 0x0014)   // typeDomainSuffixIndex
+
+	setCount := binary.LittleEndian.Uint16(index[0:2])
+	if setCount != 2 {
+		t.Fatalf("setCount=%d want 2", setCount)
+	}
+	// directory: 2 sets × {u32 start, u32 count}
+	dir := index[2 : 2+int(setCount)*8]
+	offsets := index[2+int(setCount)*8:]
+	total := 0
+	for s := 0; s < int(setCount); s++ {
+		cnt := binary.LittleEndian.Uint32(dir[s*8+4:])
+		total += int(cnt)
+	}
+	if total*4 != len(offsets) {
+		t.Fatalf("offset table len=%d want %d", len(offsets), total*4)
+	}
+	// every offset must decode to a valid (set_idx, len, value) entry
+	for k := 0; k < total; k++ {
+		off := binary.LittleEndian.Uint32(offsets[k*4:])
+		if int(off) >= len(payload) {
+			t.Fatalf("offset[%d]=%d out of payload (%d)", k, off, len(payload))
+		}
+		p := payload[off+2:] // skip set_idx
+		l, m := binary.Uvarint(p)
+		if m <= 0 || int(l) > len(p)-m {
+			t.Fatalf("offset[%d] does not point at a valid entry", k)
+		}
 	}
 }
 
