@@ -1,6 +1,9 @@
 package krs
 
-import "strings"
+import (
+	"net/netip"
+	"strings"
+)
 
 // MatchableApp is the input to MatchInstalled. The k2 daemon converts
 // its provider.InstalledApp into MatchableApp at the call site so this
@@ -143,3 +146,24 @@ func firstProcessHit(names []string, match func(string) (string, bool)) (string,
 	}
 	return "", nil, false
 }
+
+// Matcher is the per-set routing-match surface shared by the heap reader
+// (*NamedSet) and the mmap reader (*diskSet, added in a later task). Domain
+// matching takes pre-reversed parent suffixes (ReversedParents) so the
+// consumer normalizes once per lookup, not once per set.
+type Matcher interface {
+	MatchDomainReversed(reversedParents []string) bool
+	MatchIP(addr netip.Addr) bool
+}
+
+// MatchDomainReversed reports whether the pre-reversed parent list (computed
+// by ReversedParents) hits this set. Excludes take priority over suffixes.
+func (s *NamedSet) MatchDomainReversed(reversedParents []string) bool {
+	if s.excludeSection.matchReversed(reversedParents) {
+		return false
+	}
+	return s.domainSection.matchReversed(reversedParents)
+}
+
+// Compile-time assertion: *NamedSet satisfies Matcher.
+var _ Matcher = (*NamedSet)(nil)

@@ -185,7 +185,7 @@ func TestMatchDomain_HighValueChineseHosts(t *testing.T) {
 	}
 }
 
-// Excludes ride the same domainSection.Match code path as includes, so
+// Excludes ride the same domainSection.matchReversed code path as includes, so
 // the same parent+sibling bug class can hide here. This locks the fix.
 //
 // Without the parent-walk fix: an exclude bundle with {weibo.com,
@@ -504,6 +504,33 @@ func TestWriteBundle_DropsInvalidDomainEntries(t *testing.T) {
 		"foo.com", "bar.com"} {
 		if set.MatchDomain(h) {
 			t.Errorf("MatchDomain(%q) = true, want false (invalid entry leaked)", h)
+		}
+	}
+}
+
+func TestMatchDomainReversed_ParityWithMatchDomain(t *testing.T) {
+	s := &krs.NamedSet{
+		Name:           "test",
+		DomainSuffixes: []string{"google.com", "example.org"},
+		ExcludeDomains: []string{"safe.google.com"},
+	}
+	// populate read-side state the way ReadBundle would
+	var buf bytes.Buffer
+	if err := krs.WriteBundle(&buf, &krs.Bundle{Sets: []krs.NamedSet{*s}}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := krs.ReadBundle(buf.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	set := &b.Sets[0]
+	cases := []string{"google.com", "mail.google.com", "safe.google.com",
+		"fakegoogle.com", "example.org", "nope.net"}
+	for _, host := range cases {
+		want := set.MatchDomain(host)
+		got := set.MatchDomainReversed(krs.ReversedParents(host))
+		if got != want {
+			t.Errorf("host=%q reversed=%v want %v", host, got, want)
 		}
 	}
 }
