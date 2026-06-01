@@ -40,16 +40,17 @@ jobs:
 
       - name: Build tarball + VERSION
         run: |
-          # Bundle every published format: legacy .k2b + current .krs.
-          # During the ~6 month transition both ship together; clients
-          # pick whichever they know how to read.
           cd dist
-          # all.krs.tar.gz: the single .krs archive the embed/build-fetch and the
-          # embed-aware client consume. Phase A: k2-rules.tar.gz UNCHANGED (still
-          # carries .krs) so pre-embed clients keep their source. Phase B (later)
-          # strips .krs from k2-rules.tar.gz — see embedded-rules spec.
+          # Clean two-way split by consumer (no overlap):
+          #   all.krs.tar.gz = *.krs  → embed-aware clients (v0.4.5+, fetch this name)
+          #   k2-rules.tar.gz = *.k2b → released legacy clients (≤v0.4.4, read .k2b)
+          # No released client reads .krs out of k2-rules.tar.gz: ≤v0.4.4 extract
+          # only .k2b, and v0.4.5 (still unreleased) fetches all.krs.tar.gz, not
+          # this file. So k2-rules.tar.gz carries .k2b ONLY — the earlier "carry
+          # .krs too for no-stranding" was protecting a client that never shipped.
+          # Retire k2-rules.tar.gz entirely once ≤v0.4.4 age out.
           tar -czf all.krs.tar.gz *.krs
-          tar -czf k2-rules.tar.gz *.k2b *.krs
+          tar -czf k2-rules.tar.gz *.k2b
           ls -lh all.krs.tar.gz k2-rules.tar.gz
           # VERSION/change-detection keys on all.krs.tar.gz (the .krs set is what
           # matters now; .k2b is frozen legacy).
@@ -75,6 +76,14 @@ jobs:
           # The reject feature depends on tencent-overseas.krs being in the archive.
           grep -qE '(^|/)tencent-overseas\.krs$' <<<"$names" \
             || { echo "FAIL: tencent-overseas.krs missing from all.krs.tar.gz"; exit 1; }
+          # k2-rules.tar.gz is the inverse: legacy .k2b only, zero .krs (clean
+          # split — no consumer crosses formats).
+          legacy=$(tar -tzf k2-rules.tar.gz)
+          k2b_in_legacy=$(grep -c '\.k2b$' <<<"$legacy" || true)
+          krs_in_legacy=$(grep -c '\.krs$' <<<"$legacy" || true)
+          echo "k2-rules.tar.gz: ${k2b_in_legacy} .k2b, ${krs_in_legacy} .krs"
+          [ "$k2b_in_legacy" -ge 1 ] || { echo "FAIL: k2-rules.tar.gz has no .k2b"; exit 1; }
+          [ "$krs_in_legacy" -eq 0 ] || { echo "FAIL: k2-rules.tar.gz must not contain .krs (clean split)"; exit 1; }
           echo "OK: archive split verified"
 
       - name: Check for changes
@@ -123,15 +132,14 @@ jobs:
           git tag -d "${TAG}" 2>/dev/null || true
           git push origin ":refs/tags/${TAG}" 2>/dev/null || true
 
-          # Create new release.
-          # Upload every .k2b (legacy) and .krs (current) file in dist/ so the
-          # country fleet (overseas + cn/ir/ru/tr/pk/vn/mm/eg/id/sa/ae/th/bd/by/tm/kz/uz)
-          # is published without having to enumerate each bundle here.
+          # Create new release. Publish ONLY the four consumed artifacts — the
+          # two tarballs plus manifest/VERSION. The loose per-country .k2b/.krs
+          # files are intentionally NOT uploaded: no client (any 0.4.* or older)
+          # ever fetches them individually — clients download a single tarball
+          # and extract from inside it. They live only inside the tarballs now.
           gh release create "${TAG}" \
             --title "Rules ${VERSION}" \
             --notes "Auto-generated from upstream sources. See ATTRIBUTION.md." \
-            dist/*.k2b \
-            dist/*.krs \
             dist/manifest.json \
             dist/all.krs.tar.gz \
             dist/k2-rules.tar.gz \
@@ -142,11 +150,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Stash the freshly-built artifacts (legacy .k2b + current .krs).
-          # manifest.json is included so jsdelivr can serve it from @release;
-          # the GitHub Release asset upload is the authoritative copy.
+          # Stash the four published artifacts (the two tarballs + manifest +
+          # VERSION). manifest.json is included so jsdelivr can serve it from
+          # @release; the GitHub Release asset upload is the authoritative copy.
+          # Loose per-country .k2b/.krs are NOT carried — nothing fetches them
+          # individually; they live inside the tarballs.
           mkdir -p /tmp/release-artifacts
-          cp dist/*.k2b dist/*.krs dist/manifest.json dist/all.krs.tar.gz dist/k2-rules.tar.gz dist/VERSION /tmp/release-artifacts/
+          cp dist/manifest.json dist/all.krs.tar.gz dist/k2-rules.tar.gz dist/VERSION /tmp/release-artifacts/
 
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
@@ -156,7 +166,9 @@ jobs:
           git checkout release
 
           # Replace all contents with the freshly-built artifact set.
-          # Release branch carries .k2b + .krs + manifest.json + tarball + VERSION; no source.
+          # Release branch carries the 4 published artifacts only; no source,
+          # no loose per-country bundles. The git rm below wipes any loose
+          # .k2b/.krs left from earlier (pre-cleanup) nightlies.
           # Wipe both tracked (git rm) and untracked (workspace leftovers from
           # earlier build steps — dist/, k2-rules-gen — that master ignores
           # via .gitignore but release branch does not).
@@ -180,9 +192,9 @@ jobs:
           # so the four POPs (cdn / fastly / testingcf / gcore) revalidate against
           # GitHub on next client fetch. Free public service, no auth required.
           base="https://purge.jsdelivr.net/gh/kaitu-io/k2-rules@release"
+          # Only the 4 published artifacts are served from @release now; loose
+          # per-country files are no longer published, so nothing to purge for them.
           paths=(all.krs.tar.gz k2-rules.tar.gz VERSION manifest.json)
-          for f in dist/*.k2b; do paths+=("$(basename "$f")"); done
-          for f in dist/*.krs; do paths+=("$(basename "$f")"); done
           for p in "${paths[@]}"; do
             echo "purge: $p"
             # 5s connect / 15s total — purge endpoint is best-effort, never fail the build
