@@ -10,7 +10,7 @@ import (
 )
 
 // ReadBundle on the wire output of an empty Bundle should reconstruct
-// version=1, no sets, no apps.
+// version=2, no sets, no apps.
 func TestReadBundle_Empty(t *testing.T) {
 	var buf bytes.Buffer
 	if err := krs.WriteBundle(&buf, &krs.Bundle{}); err != nil {
@@ -20,8 +20,8 @@ func TestReadBundle_Empty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadBundle: %v", err)
 	}
-	if got.Version != 1 {
-		t.Errorf("Version: got %d want 1", got.Version)
+	if got.Version != 2 {
+		t.Errorf("Version: got %d want 2", got.Version)
 	}
 	if len(got.Sets) != 0 {
 		t.Errorf("Sets: got %d entries, want 0", len(got.Sets))

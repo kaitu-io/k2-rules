@@ -19,7 +19,7 @@ func TestWriteBundle_AndroidInstallers_OneEntry(t *testing.T) {
 	}
 	want := []byte{
 		// Header
-		'K', '2', 'R', 'L', 0x01, 0x00, 0x01, 0x00,
+		'K', '2', 'R', 'L', 0x02, 0x00, 0x01, 0x00,
 		// Index entry: AndroidInstallers (0x0100), off=18, len=18
 		0x00, 0x01, 18, 0, 0, 0, 18, 0, 0, 0,
 		// Payload: uvarint(17), "com.xiaomi.market"

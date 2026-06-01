@@ -18,7 +18,7 @@ func TestWriteBundle_Empty(t *testing.T) {
 	}
 	want := []byte{
 		'K', '2', 'R', 'L',
-		0x01, 0x00,
+		0x02, 0x00,
 		0x00, 0x00,
 	}
 	if !bytes.Equal(buf.Bytes(), want) {
@@ -40,7 +40,7 @@ func TestWriteBundle_OneSet_NoData(t *testing.T) {
 	want := []byte{
 		// Header
 		'K', '2', 'R', 'L',
-		0x01, 0x00,
+		0x02, 0x00,
 		0x01, 0x00, // section count = 1
 		// Index entry [TypeID=0x0001, off=18, len=9]
 		0x01, 0x00,
@@ -76,8 +76,8 @@ func TestWriteBundle_DomainSuffix(t *testing.T) {
 	}
 	// Header+index = 8 + 3×10 = 38 bytes. Payloads at off 38, 47, 60.
 	want := []byte{
-		// Header: magic, version=1, sectionCount=3
-		'K', '2', 'R', 'L', 0x01, 0x00, 0x03, 0x00,
+		// Header: magic, version=2, sectionCount=3
+		'K', '2', 'R', 'L', 0x02, 0x00, 0x03, 0x00,
 		// Index entry 0: SetTable (0x0001), off=38, len=9
 		0x01, 0x00, 38, 0, 0, 0, 9, 0, 0, 0,
 		// Index entry 1: DomainSuffixBySet (0x0012), off=47, len=13
@@ -401,7 +401,7 @@ func TestWriteBundle_TwoSets_PreservesOrder(t *testing.T) {
 	// SetTable payload: 2(count) + 1(uvarint) + 6("google") + 1(uvarint) + 7("youtube") = 17 bytes
 	want := []byte{
 		'K', '2', 'R', 'L',
-		0x01, 0x00,
+		0x02, 0x00,
 		0x01, 0x00,
 		0x01, 0x00,
 		18, 0, 0, 0,

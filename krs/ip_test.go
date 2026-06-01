@@ -20,7 +20,7 @@ func TestWriteBundle_IPv4_OneCIDR(t *testing.T) {
 	}
 	want := []byte{
 		// Header
-		'K', '2', 'R', 'L', 0x01, 0x00, 0x02, 0x00,
+		'K', '2', 'R', 'L', 0x02, 0x00, 0x02, 0x00,
 		// Index entry 0: SetTable (0x0001), off=28, len=9
 		0x01, 0x00, 28, 0, 0, 0, 9, 0, 0, 0,
 		// Index entry 1: IPv4RangesBySet (0x0010), off=37, len=10

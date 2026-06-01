@@ -13,7 +13,7 @@ const Magic = "K2RL"
 
 // Version is the current writer-emitted format generation. Informational —
 // readers do NOT reject on mismatch; forward-compat is via TypeID enum.
-const Version uint16 = 1
+const Version uint16 = 2
 
 // Bundle is the in-memory representation of one .krs file.
 //
