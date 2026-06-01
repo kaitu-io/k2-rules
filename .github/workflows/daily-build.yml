@@ -3,7 +3,12 @@ name: Daily Build
 on:
   schedule:
     - cron: '30 0 * * *'  # UTC 00:30 (30 min after upstream rebuilds)
-  workflow_dispatch: {}    # manual trigger
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Force a release even if rule content is unchanged (use when a new ARTIFACT is added — e.g. all.krs.tar.gz — that content-diff would otherwise miss)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -71,7 +76,16 @@ jobs:
         id: diff
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORCE: ${{ github.event.inputs.force }}
         run: |
+          # Manual force: content-diff keys on bundle hashes only, so adding a
+          # new artifact (all.krs.tar.gz) with unchanged rule content would be
+          # skipped. force=true bypasses the diff to publish it.
+          if [ "$FORCE" = "true" ]; then
+            echo "Force requested — creating release regardless of content diff."
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           # Download previous manifest (if any).
           PREV_MANIFEST=$(mktemp)
           if gh release download --pattern manifest.json -D "$(dirname "$PREV_MANIFEST")" -O "$PREV_MANIFEST" 2>/dev/null; then
