@@ -156,9 +156,12 @@ func (db *DiskBundle) bindDomain(secs map[uint16][]byte, payID, idxID uint16, ex
 	for s := 0; s < setCount; s++ {
 		start := binary.LittleEndian.Uint32(index[2+s*8:])
 		count := binary.LittleEndian.Uint32(index[2+s*8+4:])
-		lo := int(start) * 4
-		hi := int(start+count) * 4
-		if lo > hi || hi > len(offTable) {
+		// uint64 throughout: start*4 and (start+count)*4 each fit in uint64 with
+		// no overflow, where int math would wrap on a 32-bit target. count>=0 so
+		// lo<=hi is guaranteed; only the upper bound needs checking.
+		lo := uint64(start) * 4
+		hi := (uint64(start) + uint64(count)) * 4
+		if hi > uint64(len(offTable)) {
 			return fmt.Errorf("krs: domain index set %d range out of bounds", s)
 		}
 		blk := domainBlock{payload: payload, offsets: offTable[lo:hi]}
@@ -218,11 +221,27 @@ func (b *domainBlock) matchReversed(parents []string) bool {
 }
 
 // entryBytes returns the reversed-domain value bytes of the k-th entry as a
-// slice into the mmap (no allocation).
+// slice into the mmap (no allocation). Every offset and length read out of the
+// mapped file is bounds-checked: the bundle may be corrupt (transport bit-rot, a
+// half-written object, a buggy producer) and the constitution forbids a full
+// validating scan at Open, so each access fails safe to nil rather than panicking
+// the process. A nil result compares as the empty string in cmpBS, which never
+// equals a (non-empty) reversed query — corruption can neither crash nor forge a
+// match. All arithmetic is uint64 so it cannot overflow int on 32-bit targets.
 func (b *domainBlock) entryBytes(k int) []byte {
-	off := binary.LittleEndian.Uint32(b.offsets[k*4:])
+	o := k * 4
+	if o < 0 || o+4 > len(b.offsets) {
+		return nil
+	}
+	off := uint64(binary.LittleEndian.Uint32(b.offsets[o:]))
+	if off+2 > uint64(len(b.payload)) {
+		return nil
+	}
 	p := b.payload[off+2:] // skip u16 set_idx
 	l, m := binary.Uvarint(p)
+	if m <= 0 || l > uint64(len(p)-m) {
+		return nil
+	}
 	return p[m : m+int(l)]
 }
 
