@@ -60,15 +60,20 @@ jobs:
         working-directory: dist
         run: |
           set -euo pipefail
+          # Capture the listing ONCE. Do not pipe `tar | grep -q`: grep -q exits
+          # on first match, closes the pipe, tar gets SIGPIPE, and `pipefail`
+          # then fails the whole pipeline despite a successful match (the bug
+          # that false-failed this step on 2026-06-01). Grep a here-string
+          # instead — no pipe, no SIGPIPE.
+          names=$(tar -tzf all.krs.tar.gz)
           # all.krs.tar.gz must contain every .krs and zero .k2b.
-          krs_in_all=$(tar -tzf all.krs.tar.gz | grep -c '\.krs$' || true)
-          k2b_in_all=$(tar -tzf all.krs.tar.gz | grep -c '\.k2b$' || true)
+          krs_in_all=$(grep -c '\.krs$' <<<"$names" || true)
+          k2b_in_all=$(grep -c '\.k2b$' <<<"$names" || true)
           echo "all.krs.tar.gz: ${krs_in_all} .krs, ${k2b_in_all} .k2b"
           [ "$krs_in_all" -ge 1 ] || { echo "FAIL: all.krs.tar.gz has no .krs"; exit 1; }
           [ "$k2b_in_all" -eq 0 ] || { echo "FAIL: all.krs.tar.gz must not contain .k2b"; exit 1; }
           # The reject feature depends on tencent-overseas.krs being in the archive.
-          tar -tzf all.krs.tar.gz | grep -q '^tencent-overseas\.krs$' \
-            || tar -tzf all.krs.tar.gz | grep -q '/tencent-overseas\.krs$' \
+          grep -qE '(^|/)tencent-overseas\.krs$' <<<"$names" \
             || { echo "FAIL: tencent-overseas.krs missing from all.krs.tar.gz"; exit 1; }
           echo "OK: archive split verified"
 
