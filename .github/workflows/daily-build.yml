@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       force:
-        description: 'Force a release even if rule content is unchanged (use when a new ARTIFACT is added — e.g. all.krs.tar.gz — that content-diff would otherwise miss)'
+        description: 'Force a release even if rule content is unchanged (use when a new ARTIFACT is added — e.g. krs.tar.gz — that content-diff would otherwise miss)'
         type: boolean
         default: false
 
@@ -42,19 +42,19 @@ jobs:
         run: |
           cd dist
           # Clean two-way split by consumer (no overlap):
-          #   all.krs.tar.gz = *.krs  → embed-aware clients (v0.4.5+, fetch this name)
+          #   krs.tar.gz = *.krs  → embed-aware clients (v0.4.5+, fetch this name)
           #   k2-rules.tar.gz = *.k2b → released legacy clients (≤v0.4.4, read .k2b)
           # No released client reads .krs out of k2-rules.tar.gz: ≤v0.4.4 extract
-          # only .k2b, and v0.4.5 (still unreleased) fetches all.krs.tar.gz, not
+          # only .k2b, and v0.4.5 (still unreleased) fetches krs.tar.gz, not
           # this file. So k2-rules.tar.gz carries .k2b ONLY — the earlier "carry
           # .krs too for no-stranding" was protecting a client that never shipped.
           # Retire k2-rules.tar.gz entirely once ≤v0.4.4 age out.
-          tar -czf all.krs.tar.gz *.krs
+          tar -czf krs.tar.gz *.krs
           tar -czf k2-rules.tar.gz *.k2b
-          ls -lh all.krs.tar.gz k2-rules.tar.gz
-          # VERSION/change-detection keys on all.krs.tar.gz (the .krs set is what
+          ls -lh krs.tar.gz k2-rules.tar.gz
+          # VERSION/change-detection keys on krs.tar.gz (the .krs set is what
           # matters now; .k2b is frozen legacy).
-          printf '%s sha256:%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(sha256sum all.krs.tar.gz | awk '{print $1}')" > VERSION
+          printf '%s sha256:%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(sha256sum krs.tar.gz | awk '{print $1}')" > VERSION
           cat VERSION
 
       - name: Verify archive split
@@ -66,16 +66,16 @@ jobs:
           # then fails the whole pipeline despite a successful match (the bug
           # that false-failed this step on 2026-06-01). Grep a here-string
           # instead — no pipe, no SIGPIPE.
-          names=$(tar -tzf all.krs.tar.gz)
-          # all.krs.tar.gz must contain every .krs and zero .k2b.
+          names=$(tar -tzf krs.tar.gz)
+          # krs.tar.gz must contain every .krs and zero .k2b.
           krs_in_all=$(grep -c '\.krs$' <<<"$names" || true)
           k2b_in_all=$(grep -c '\.k2b$' <<<"$names" || true)
-          echo "all.krs.tar.gz: ${krs_in_all} .krs, ${k2b_in_all} .k2b"
-          [ "$krs_in_all" -ge 1 ] || { echo "FAIL: all.krs.tar.gz has no .krs"; exit 1; }
-          [ "$k2b_in_all" -eq 0 ] || { echo "FAIL: all.krs.tar.gz must not contain .k2b"; exit 1; }
+          echo "krs.tar.gz: ${krs_in_all} .krs, ${k2b_in_all} .k2b"
+          [ "$krs_in_all" -ge 1 ] || { echo "FAIL: krs.tar.gz has no .krs"; exit 1; }
+          [ "$k2b_in_all" -eq 0 ] || { echo "FAIL: krs.tar.gz must not contain .k2b"; exit 1; }
           # The reject feature depends on tencent-overseas.krs being in the archive.
           grep -qE '(^|/)tencent-overseas\.krs$' <<<"$names" \
-            || { echo "FAIL: tencent-overseas.krs missing from all.krs.tar.gz"; exit 1; }
+            || { echo "FAIL: tencent-overseas.krs missing from krs.tar.gz"; exit 1; }
           # k2-rules.tar.gz is the inverse: legacy .k2b only, zero .krs (clean
           # split — no consumer crosses formats).
           legacy=$(tar -tzf k2-rules.tar.gz)
@@ -93,7 +93,7 @@ jobs:
           FORCE: ${{ github.event.inputs.force }}
         run: |
           # Manual force: content-diff keys on bundle hashes only, so adding a
-          # new artifact (all.krs.tar.gz) with unchanged rule content would be
+          # new artifact (krs.tar.gz) with unchanged rule content would be
           # skipped. force=true bypasses the diff to publish it.
           if [ "$FORCE" = "true" ]; then
             echo "Force requested — creating release regardless of content diff."
@@ -141,7 +141,7 @@ jobs:
             --title "Rules ${VERSION}" \
             --notes "Auto-generated from upstream sources. See ATTRIBUTION.md." \
             dist/manifest.json \
-            dist/all.krs.tar.gz \
+            dist/krs.tar.gz \
             dist/k2-rules.tar.gz \
             dist/VERSION
 
@@ -156,7 +156,7 @@ jobs:
           # Loose per-country .k2b/.krs are NOT carried — nothing fetches them
           # individually; they live inside the tarballs.
           mkdir -p /tmp/release-artifacts
-          cp dist/manifest.json dist/all.krs.tar.gz dist/k2-rules.tar.gz dist/VERSION /tmp/release-artifacts/
+          cp dist/manifest.json dist/krs.tar.gz dist/k2-rules.tar.gz dist/VERSION /tmp/release-artifacts/
 
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
@@ -194,7 +194,7 @@ jobs:
           base="https://purge.jsdelivr.net/gh/kaitu-io/k2-rules@release"
           # Only the 4 published artifacts are served from @release now; loose
           # per-country files are no longer published, so nothing to purge for them.
-          paths=(all.krs.tar.gz k2-rules.tar.gz VERSION manifest.json)
+          paths=(krs.tar.gz k2-rules.tar.gz VERSION manifest.json)
           for p in "${paths[@]}"; do
             echo "purge: $p"
             # 5s connect / 15s total — purge endpoint is best-effort, never fail the build
