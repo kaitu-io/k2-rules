@@ -38,6 +38,14 @@ jobs:
       - name: Show output
         run: ls -lh dist/
 
+      - name: Validate generated .krs bundles
+        # Publish-time structural gate (constitution rule 4: "validate structure
+        # at publish time"). Opens every .krs through the runtime mmap path AND
+        # the heap reader and cross-checks them, so a structurally-broken or
+        # index-less bundle can never reach the CDN — turning the deploy-ordering
+        # trap (shipping krs.tar.gz without index sections) into a hard failure.
+        run: go run ./tools/validate-krs dist
+
       - name: Build tarball + VERSION
         run: |
           cd dist
