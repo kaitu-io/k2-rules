@@ -23,6 +23,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/kaitu-io/k2-rules/krs"
 )
 
 func main() {
@@ -922,21 +924,27 @@ func reverseStr(s string) string {
 // ============================================================================
 
 type manifest struct {
-	Version string                    `json:"version"`
-	Bundles map[string]manifestBundle `json:"bundles"`
+	SchemaVersion int                       `json:"schemaVersion"`
+	Version       string                    `json:"version"` // RFC3339 UTC; second granularity (monotonic across daily builds)
+	Bundles       map[string]manifestBundle `json:"bundles"`
 }
 
 type manifestBundle struct {
-	Version string `json:"version"`
-	SHA256  string `json:"sha256"`
-	Size    int64  `json:"size"`
+	SHA256    string `json:"sha256"`
+	Size      int64  `json:"size"`
+	RuleCount int    `json:"ruleCount"`
+
+	// krsAuthoritative marks that a .krs already set this entry, so a later
+	// .k2b sibling must not overwrite it. Internal only — never serialized.
+	krsAuthoritative bool `json:"-"`
 }
 
 func buildManifest(dir string) manifest {
-	version := time.Now().Format("2006-01-02")
+	version := time.Now().UTC().Format(time.RFC3339)
 	m := manifest{
-		Version: version,
-		Bundles: make(map[string]manifestBundle),
+		SchemaVersion: 2,
+		Version:       version,
+		Bundles:       make(map[string]manifestBundle),
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -961,17 +969,37 @@ func buildManifest(dir string) manifest {
 		default:
 			continue
 		}
+		isKRS := strings.HasSuffix(name, ".krs")
 		path := filepath.Join(dir, name)
 		data, err := os.ReadFile(path)
 		if err != nil {
 			continue
 		}
-		h := sha256.Sum256(data)
-		m.Bundles[key] = manifestBundle{
-			Version: version,
-			SHA256:  fmt.Sprintf("%x", h),
-			Size:    int64(len(data)),
+		existing, exists := m.Bundles[key]
+		// .krs is authoritative for a shared key: it's the format the new client
+		// fetches and verifies. Never let a .k2b sibling overwrite .krs metadata
+		// (replaces the implicit alphabetical-order win with an explicit flag).
+		if exists && existing.krsAuthoritative && !isKRS {
+			continue
 		}
+		h := sha256.Sum256(data)
+		mb := manifestBundle{
+			SHA256: fmt.Sprintf("%x", h),
+			Size:   int64(len(data)),
+		}
+		if isKRS {
+			mb.krsAuthoritative = true
+			if b, err := krs.ReadBundle(data); err == nil {
+				mb.RuleCount = b.RuleCount()
+			} else {
+				// A .krs the build emitted but the manifest builder can't parse
+				// is a corruption/format-skew signal. Leaving ruleCount=0 here
+				// would later trip Task 7's empty-bundle floor with a misleading
+				// "0 rules" cause — log loudly so the real reason is one grep away.
+				log.Printf("  WARN: manifest: cannot parse %s for ruleCount: %v", name, err)
+			}
+		}
+		m.Bundles[key] = mb
 	}
 	return m
 }
