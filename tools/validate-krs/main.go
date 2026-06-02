@@ -16,9 +16,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/kaitu-io/k2-rules/krs"
 )
@@ -51,7 +53,85 @@ func main() {
 			failed, len(paths))
 		os.Exit(1)
 	}
+	if err := checkRuleFloor(dir, loadPrevCounts(os.Getenv("PREV_MANIFEST"))); err != nil {
+		fmt.Fprintln(os.Stderr, "validate-krs:", err)
+		os.Exit(1)
+	}
 	fmt.Printf("validate-krs: %d bundle(s) OK\n", len(paths))
+}
+
+// criticalRegions must never regress sharply — a silent rule collapse here
+// degrades a whole region to all-proxy (the incident class this gate guards).
+var criticalRegions = []string{"cn"}
+
+// regressionFloorPct: a critical region's new ruleCount must be at least this
+// percent of its previous manifest value.
+const regressionFloorPct = 80
+
+// checkRuleFloor opens every *.krs in dir and enforces: (1) ruleCount > 0 for
+// all; (2) each critical region >= regressionFloorPct% of prevCounts[region]
+// (when a previous count is known). prevCounts may be nil (first release).
+func checkRuleFloor(dir string, prevCounts map[string]int) error {
+	paths, err := filepath.Glob(filepath.Join(dir, "*.krs"))
+	if err != nil {
+		return err
+	}
+	counts := map[string]int{}
+	for _, p := range paths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		b, err := krs.ReadBundle(data)
+		if err != nil {
+			return fmt.Errorf("%s: %w", filepath.Base(p), err)
+		}
+		region := strings.TrimSuffix(filepath.Base(p), ".krs")
+		n := b.RuleCount()
+		if n == 0 {
+			return fmt.Errorf("%s: 0 rules — empty bundle would route the region to all-proxy", region)
+		}
+		counts[region] = n
+	}
+	for _, region := range criticalRegions {
+		prev, ok := prevCounts[region]
+		if !ok || prev == 0 {
+			continue
+		}
+		cur := counts[region]
+		if cur*100 < prev*regressionFloorPct {
+			return fmt.Errorf("%s: ruleCount regressed %d → %d (< %d%% of previous)",
+				region, prev, cur, regressionFloorPct)
+		}
+	}
+	return nil
+}
+
+// loadPrevCounts reads ruleCount per region from a previous manifest.json path
+// (env PREV_MANIFEST, set by CI from the prior release). Missing/unreadable →
+// nil (no regression check on first release, or when the prior manifest predates
+// the ruleCount field).
+func loadPrevCounts(path string) map[string]int {
+	if path == "" {
+		return nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var m struct {
+		Bundles map[string]struct {
+			RuleCount int `json:"ruleCount"`
+		} `json:"bundles"`
+	}
+	if json.Unmarshal(data, &m) != nil {
+		return nil
+	}
+	out := map[string]int{}
+	for k, v := range m.Bundles {
+		out[k] = v.RuleCount
+	}
+	return out
 }
 
 // validateFile opens path through both readers and cross-checks them. Returns a

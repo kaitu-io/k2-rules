@@ -38,12 +38,24 @@ jobs:
       - name: Show output
         run: ls -lh dist/
 
+      - name: Download previous manifest (for regression gate)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p /tmp/prev
+          gh release download --pattern manifest.json -D /tmp/prev 2>/dev/null || echo "no previous manifest (first release)"
+
       - name: Validate generated .krs bundles
         # Publish-time structural gate (constitution rule 4: "validate structure
         # at publish time"). Opens every .krs through the runtime mmap path AND
         # the heap reader and cross-checks them, so a structurally-broken or
         # index-less bundle can never reach the CDN — turning the deploy-ordering
         # trap (shipping krs.tar.gz without index sections) into a hard failure.
+        # Also enforces a content gate: any region compiling to 0 rules, or cn
+        # dropping below 80% of the previous release's ruleCount (PREV_MANIFEST),
+        # fails the publish instead of silently routing the region to all-proxy.
+        env:
+          PREV_MANIFEST: /tmp/prev/manifest.json
         run: go run ./tools/validate-krs dist
 
       - name: Build tarball + VERSION

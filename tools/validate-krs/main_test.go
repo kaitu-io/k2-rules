@@ -68,3 +68,48 @@ func TestValidateFile_DomainPayloadMissingIndex(t *testing.T) {
 		t.Fatal("index-less bundle accepted — gate would let an unreadable artifact reach the CDN")
 	}
 }
+
+// writeKRSAt writes a bundle to a named .krs path inside dir, so the
+// floor-check tests can control the region (filename) under test.
+func writeKRSAt(t *testing.T, path string, b *krs.Bundle) {
+	t.Helper()
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := krs.WriteBundle(f, b); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCheckRuleFloor_RejectsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	writeKRSAt(t, filepath.Join(dir, "empty.krs"), &krs.Bundle{Sets: []krs.NamedSet{{Name: "s"}}})
+	if err := checkRuleFloor(dir, nil); err == nil {
+		t.Fatal("expected empty.krs (0 rules) to fail the floor, got nil")
+	}
+}
+
+func TestCheckRuleFloor_RejectsCNRegression(t *testing.T) {
+	dir := t.TempDir()
+	// New cn has 1 rule; previous manifest claimed 100 → 1 < 80 → fail.
+	writeKRSAt(t, filepath.Join(dir, "cn.krs"), &krs.Bundle{Sets: []krs.NamedSet{
+		{Name: "s", DomainSuffixes: []string{"a.com"}},
+	}})
+	prev := map[string]int{"cn": 100}
+	if err := checkRuleFloor(dir, prev); err == nil {
+		t.Fatal("expected cn regression (1 vs 100) to fail, got nil")
+	}
+}
+
+func TestCheckRuleFloor_PassesHealthy(t *testing.T) {
+	dir := t.TempDir()
+	writeKRSAt(t, filepath.Join(dir, "cn.krs"), &krs.Bundle{Sets: []krs.NamedSet{
+		{Name: "s", DomainSuffixes: []string{"a.com", "b.com", "c.com", "d.com"}},
+	}})
+	prev := map[string]int{"cn": 4}
+	if err := checkRuleFloor(dir, prev); err != nil {
+		t.Fatalf("healthy cn should pass: %v", err)
+	}
+}
