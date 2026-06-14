@@ -204,19 +204,68 @@ jobs:
           git commit -m "nightly: $(date -u +%Y-%m-%dT%H:%MZ)"
           git push origin release
 
-      - name: Purge jsdelivr CDN cache
+      - name: Purge + verify jsdelivr CDN consistency
         if: steps.diff.outputs.changed == 'true'
         run: |
-          # jsdelivr caches @release branch artifacts for up to 12h (s-maxage=43200).
-          # A GET to purge.jsdelivr.net flushes the file across all jsdelivr edges
-          # so the four POPs (cdn / fastly / testingcf / gcore) revalidate against
-          # GitHub on next client fetch. Free public service, no auth required.
-          base="https://purge.jsdelivr.net/gh/kaitu-io/k2-rules@release"
-          # Only the 4 published artifacts are served from @release now; loose
-          # per-country files are no longer published, so nothing to purge for them.
-          paths=(krs.tar.gz k2-rules.tar.gz VERSION manifest.json)
-          for p in "${paths[@]}"; do
-            echo "purge: $p"
-            # 5s connect / 15s total — purge endpoint is best-effort, never fail the build
-            curl -sS --max-time 15 --connect-timeout 5 -o /dev/null -w '  %{http_code}\n' "${base}/${p}" || echo "  (purge failed, non-fatal)"
+          set -uo pipefail
+          # Why this gate exists: SHIPPED clients (<= v0.4.5) verify each downloaded
+          # .krs against the per-region sha in the manifest they fetched. jsdelivr
+          # serves a FRESH manifest.json + STALE krs.tar.gz on a subset of POPs (the
+          # small files propagate, the 2.5MB tarball lags), so an old client pairs
+          # new-manifest + old-tarball -> sha mismatch -> it keeps a stale/empty
+          # cache -> degrades to all-proxy -> "cannot connect" (2026-06, #2960 et al).
+          # We cannot change already-shipped clients, so the only lever for them is
+          # to keep the CDN self-consistent: purge, then VERIFY every POP serves the
+          # just-built manifest.json + krs.tar.gz, retrying; if a POP stays skewed,
+          # FAIL the job (loud). The release is already published — red just signals
+          # that old clients on a lagging POP are at risk.
+          #
+          # Caveats: jsdelivr is anycast (CI's edge != a user's edge) and purge is
+          # unreliable for testingcf/gcore (observed: HTTP 200 but no flush), so
+          # green here is necessary, not sufficient. NEW clients drop sha
+          # verification entirely (k2 cb00194) and are immune to this skew — this
+          # gate is purely a best-effort backstop for the OLD, still-verifying fleet.
+          want_tar=$(sha256sum dist/krs.tar.gz | awk '{print $1}')
+          want_manifest=$(sha256sum dist/manifest.json | awk '{print $1}')
+          pops=(cdn fastly testingcf gcore)
+          arts=(krs.tar.gz k2-rules.tar.gz VERSION manifest.json)
+
+          purge_all() {
+            for p in "${arts[@]}"; do
+              echo "  purge: $p"
+              curl -sS --max-time 20 --connect-timeout 5 -o /dev/null \
+                "https://purge.jsdelivr.net/gh/kaitu-io/k2-rules@release/${p}" || true
+            done
+          }
+
+          verify_all() {
+            local bad=0
+            for pop in "${pops[@]}"; do
+              base="https://${pop}.jsdelivr.net/gh/kaitu-io/k2-rules@release"
+              got_tar=$(curl -sSL --max-time 90 "${base}/krs.tar.gz" 2>/dev/null | sha256sum | awk '{print $1}')
+              got_manifest=$(curl -sSL --max-time 30 "${base}/manifest.json" 2>/dev/null | sha256sum | awk '{print $1}')
+              if [ "$got_tar" != "$want_tar" ]; then
+                echo "  [$pop] krs.tar.gz STALE (got ${got_tar:0:12}, want ${want_tar:0:12})"; bad=1
+              fi
+              if [ "$got_manifest" != "$want_manifest" ]; then
+                echo "  [$pop] manifest.json STALE (got ${got_manifest:0:12}, want ${want_manifest:0:12})"; bad=1
+              fi
+            done
+            return $bad
+          }
+
+          for attempt in 1 2 3 4 5 6; do
+            echo "=== purge+verify attempt ${attempt}/6 ==="
+            purge_all
+            sleep $((attempt * 15))
+            if verify_all; then
+              echo "OK: all POPs serve the just-built manifest.json + krs.tar.gz"
+              exit 0
+            fi
           done
+          echo "FAIL: jsdelivr POPs still skewed after 6 attempts."
+          echo "Release IS published (GitHub asset is authoritative); the CDN is"
+          echo "inconsistent and OLD clients (which still verify the per-region sha)"
+          echo "pinned to a lagging POP will brick. Re-run this workflow or purge"
+          echo "manually until green."
+          exit 1
