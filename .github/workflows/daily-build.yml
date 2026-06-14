@@ -76,6 +76,13 @@ jobs:
           # matters now; .k2b is frozen legacy).
           printf '%s sha256:%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(sha256sum krs.tar.gz | awk '{print $1}')" > VERSION
           cat VERSION
+          # Lock the just-built shas into the job env NOW, while dist/ still
+          # exists — the later "Sync release branch" step does `rm -rf dist`, so
+          # the consistency gate (which runs after it) can't read dist/ anymore.
+          {
+            echo "WANT_TAR=$(sha256sum krs.tar.gz | awk '{print $1}')"
+            echo "WANT_MANIFEST=$(sha256sum manifest.json | awk '{print $1}')"
+          } >> "$GITHUB_ENV"
 
       - name: Verify archive split
         working-directory: dist
@@ -225,8 +232,10 @@ jobs:
           # green here is necessary, not sufficient. NEW clients drop sha
           # verification entirely (k2 cb00194) and are immune to this skew — this
           # gate is purely a best-effort backstop for the OLD, still-verifying fleet.
-          want_tar=$(sha256sum dist/krs.tar.gz | awk '{print $1}')
-          want_manifest=$(sha256sum dist/manifest.json | awk '{print $1}')
+          # want_* were locked into $GITHUB_ENV by the "Build tarball" step,
+          # because "Sync release branch" rm -rf's dist/ before this gate runs.
+          want_tar="$WANT_TAR"
+          want_manifest="$WANT_MANIFEST"
           pops=(cdn fastly testingcf gcore)
           arts=(krs.tar.gz k2-rules.tar.gz VERSION manifest.json)
 
