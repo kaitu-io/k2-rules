@@ -27,6 +27,15 @@ func TestGamesServicesShape(t *testing.T) {
 	if len(gamesAnchors) == 0 {
 		t.Error("gamesAnchors is empty — the build would ship an unvalidated set")
 	}
+	if len(gamesAnchors) != len(ip.IPURLs) {
+		t.Errorf("gamesAnchors has %d entries but games-ip has %d IPURLs — "+
+			"every ASN feed must have its own anchor, or validateGames' "+
+			"fail-closed guard silently degrades to \"at least one feed is "+
+			"still alive\" instead of \"every feed is still alive\": with N "+
+			"anchors < M feeds, an anchor can be satisfied by a surviving "+
+			"feed even after (M-N) other feeds go empty or get reassigned",
+			len(gamesAnchors), len(ip.IPURLs))
+	}
 }
 
 func TestValidateGames(t *testing.T) {

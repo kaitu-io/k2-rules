@@ -62,7 +62,18 @@ func main() {
 
 // criticalRegions must never regress sharply — a silent rule collapse here
 // degrades a whole region to all-proxy (the incident class this gate guards).
-var criticalRegions = []string{"cn"}
+//
+// Keys are manifest bundle names (buildManifest in main.go: .krs basename
+// without suffix), not just per-country regions — "games" and
+// "tencent-overseas" are standalone bundles (sources.go) whose fail-closed
+// guards (validateGames / validateTencentOverseas) only catch a *complete*
+// collapse (0 rules, or a covering anchor going uncovered). A *partial*
+// collapse — e.g. upstream v2fly renames/splits category-games-!cn and
+// games-sites drops from ~800 domains to a handful, while games-ip's 124
+// anchor-covering CIDRs keep the per-bundle floor happy — would otherwise
+// ship silently. Listing them here extends the 80%-of-previous floor to
+// them too.
+var criticalRegions = []string{"cn", "games", "tencent-overseas"}
 
 // regressionFloorPct: a critical region's new ruleCount must be at least this
 // percent of its previous manifest value.

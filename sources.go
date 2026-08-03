@@ -322,16 +322,27 @@ var tencentOverseasAnchors = []string{"43.159.235.61", "43.153.236.237"}
 // sweep games into the direct route.
 var gamesServices = []service{
 	{
+		// "category-games" itself is just "include:category-games-cn" +
+		// "include:category-games-!cn" — pulling the whole category also pulls
+		// the CN half (Tencent games, miHoYo CN client, 4399, bilibili-game,
+		// etc.), and those ~289 domains are already covered by cn-sites for
+		// direct routing. If a client applies games routing before cn-direct,
+		// that overlap silently strips domestic games away from the direct
+		// route and sends them overseas — a real regression for CN users, not
+		// a hypothetical one (verified: all 289 CN-half domains already exist
+		// in cn-sites). Restricting to the overseas half keeps games-sites
+		// purely additive: it only ever adds domains cn-sites doesn't already
+		// route, so route ordering can never take a CN domain away from direct.
 		Name:       "games-sites",
-		V2flyNames: []string{"category-games"},
+		V2flyNames: []string{"category-games-!cn"},
 	},
 	{
 		Name: "games-ip",
 		IPURLs: []string{
 			"https://raw.githubusercontent.com/ipverse/asn-ip/master/as/32590/ipv4-aggregated.txt", // AS32590 Valve Corporation
-			"https://raw.githubusercontent.com/ipverse/asn-ip/master/as/6507/ipv4-aggregated.txt",   // AS6507 Riot Games Inc (RIOT-NA1)
-			"https://raw.githubusercontent.com/ipverse/asn-ip/master/as/57976/ipv4-aggregated.txt",  // AS57976 Blizzard Entertainment Inc
-			"https://raw.githubusercontent.com/ipverse/asn-ip/master/as/33353/ipv4-aggregated.txt",  // AS33353 Sony Interactive Entertainment LLC (AS-GAIKAI)
+			"https://raw.githubusercontent.com/ipverse/asn-ip/master/as/6507/ipv4-aggregated.txt",  // AS6507 Riot Games Inc (RIOT-NA1)
+			"https://raw.githubusercontent.com/ipverse/asn-ip/master/as/57976/ipv4-aggregated.txt", // AS57976 Blizzard Entertainment Inc
+			"https://raw.githubusercontent.com/ipverse/asn-ip/master/as/33353/ipv4-aggregated.txt", // AS33353 Sony Interactive Entertainment LLC (AS-GAIKAI)
 		},
 	},
 }
@@ -339,6 +350,16 @@ var gamesServices = []service{
 // gamesAnchors are IPs that games-ip must cover. The daily build fails closed
 // if an upstream format change or ASN re-allocation makes the set stop
 // matching them — same guard as tencentOverseasAnchors.
+//
+// INVARIANT — 1:1 with games-ip's IPURLs, one anchor per ASN feed, in the
+// same order. validateGames (main.go) only checks that every anchor is
+// covered by the union of all CIDRs, not that any specific feed produced any
+// specific anchor. If a future ASN is added to IPURLs without a matching
+// anchor here, the guard silently degrades from "every vendor ASN feed is
+// still alive" to "at least one vendor ASN feed is still alive" — losing 3
+// of 4 feeds would no longer fail closed. games_test.go's
+// TestGamesServicesShape enforces len(gamesAnchors) == len(IPURLs); keep them
+// in lockstep when editing either slice.
 //
 // IMPORTANT — these are NOT observed game-server IPs (unlike
 // tencentOverseasAnchors, which came from a real incident). They are
