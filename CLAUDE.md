@@ -100,6 +100,15 @@ CDN artifacts: `<region>.krs` (e.g. `cn.krs`, `ir.krs`). One file per region, al
 
 The legacy `.k2b` format continues to ship for ~6 months alongside `.krs` (separate writers, no format coupling). Both feed the same manifest.
 
+### Standalone Bundles
+
+Not every `.krs` is per-region or the single overseas umbrella. Some are standalone: built once per run (guarded by `if *onlyCountry == ""` in `main.go`, so `-country=<cc>` skips them for faster local iteration), referenced by the client via `match.names` regardless of region, and deliberately kept **outside** any `<region>.krs` so a region's compilation does not sweep them into that region's route.
+
+- **`tencent-overseas.krs`** — one IP-only set, `tencent-overseas` (AS132203, Tencent's overseas PoPs). Referenced by the client with `via:reject` in cn-bypass mode only, so WeChat HTTPDNS traffic that resolves to Tencent's overseas IPs fails over to the mainland IPs the `cn-direct` route already handles. Fail-closed: `validateGames`'s sibling `validateTencentOverseas` (`main.go`) aborts the whole build if AS132203 comes back empty or stops covering 2 anchor IPs observed during the real incident (`tencentOverseasAnchors`, `sources.go`).
+- **`games.krs`** — two sets: `games-sites` (domains, v2fly `category-games`) and `games-ip` (CIDRs, from 4 game-vendor ASNs — AS32590 Valve, AS6507 Riot, AS57976 Blizzard, AS33353 Sony/Gaikai). Split in two because game clients address login/patching/store by domain but reach match servers by bare IP with no DNS lookup — `games-sites` and `games-ip` need to be routable independently. Fail-closed: `validateGames` (`main.go`) aborts the build if `games-ip` comes back empty or stops covering the anchors in `gamesAnchors` (`sources.go`).
+
+  **`gamesAnchors` caveat (documented in full in `sources.go`)**: unlike `tencentOverseasAnchors` (real incident IPs), these are placeholders — the first advertised block from each ASN's current `ipverse/asn-ip` aggregated list, not an observed game server. The guard therefore only proves "the upstream ASN feed for this vendor is still reachable and still shaped like their block" — it does **not** prove that any specific address is still a live game server, or that the vendor still operates that block today beyond what the aggregated list currently claims. Upgrading each anchor to a packet-capture-observed IP (cross-checked at bgp.tools) would close that gap; not done yet.
+
 ## k2 Migration Contract
 
 k2 imports `github.com/kaitu-io/k2-rules/krs`. API mapping from the old k2-side packages:
