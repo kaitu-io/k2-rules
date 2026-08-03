@@ -28,3 +28,18 @@ func TestGamesServicesShape(t *testing.T) {
 		t.Error("gamesAnchors is empty — the build would ship an unvalidated set")
 	}
 }
+
+func TestValidateGames(t *testing.T) {
+	// A set that covers the anchor passes.
+	if err := validateGames([]string{"203.0.113.0/24"}, []string{"203.0.113.7"}); err != nil {
+		t.Errorf("covering set rejected: %v", err)
+	}
+	// A set that misses the anchor fails closed.
+	if err := validateGames([]string{"198.51.100.0/24"}, []string{"203.0.113.7"}); err == nil {
+		t.Error("non-covering set accepted, want error (fail-closed guard is off)")
+	}
+	// An empty set fails closed.
+	if err := validateGames(nil, []string{"203.0.113.7"}); err == nil {
+		t.Error("empty set accepted, want error")
+	}
+}

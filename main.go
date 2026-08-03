@@ -83,6 +83,41 @@ func main() {
 		}
 	}
 
+	// Build games standalone bundle (vendor domains + vendor ASN CIDRs).
+	// Two sets: games-sites (domains) and games-ip (CIDRs). Skipped under
+	// -country for faster local iteration. Fail-closed: an empty set or one
+	// that no longer covers the anchor IPs aborts the build, so the last good
+	// release stays live instead of shipping a set that silently matches
+	// nothing.
+	if *onlyCountry == "" {
+		log.Println("=== building games.krs ===")
+		gamesSets, err := buildSets(gamesServices, v2flyDir)
+		if err != nil {
+			log.Fatalf("build games: %v", err)
+		}
+		if len(gamesSets) != 2 {
+			log.Fatalf("games: expected 2 sets, got %d", len(gamesSets))
+		}
+		var ipSet *bundleSet
+		for i := range gamesSets {
+			if gamesSets[i].Name == "games-ip" {
+				ipSet = &gamesSets[i]
+			}
+			if len(gamesSets[i].Domains) == 0 && len(gamesSets[i].CIDRs) == 0 {
+				log.Fatalf("games: set %q is empty", gamesSets[i].Name)
+			}
+		}
+		if ipSet == nil {
+			log.Fatalf("games: games-ip set missing")
+		}
+		if err := validateGames(ipSet.CIDRs, gamesAnchors); err != nil {
+			log.Fatalf("games validation failed: %v", err)
+		}
+		if err := writeKRSBundle(filepath.Join(*outDir, "games.krs"), gamesSets, nil); err != nil {
+			log.Fatalf("write games.krs: %v", err)
+		}
+	}
+
 	// Build per-country bundles. Each country gets:
 	//   <cc>-direct.k2b  — legacy routing-only bundle
 	//   <cc>.krs         — unified routing + app patterns (current format)
@@ -185,6 +220,41 @@ func validateTencentOverseas(cidrs []string, anchors []string) error {
 		}
 		if !covered {
 			return fmt.Errorf("tencent-overseas missing anchor %s (AS132203 changed?)", a)
+		}
+	}
+	return nil
+}
+
+// validateGames fail-closes the games.krs build. buildSets WARN-continues on
+// a failed source fetch, leaving CIDRs empty; writing that would publish a
+// 0-CIDR games-ip set and silently turn the vendor ASN match into a no-op.
+// It also guards against one of the vendor ASNs dropping the IPs we expect
+// (upstream re-aggregation / re-allocation). Same shape as
+// validateTencentOverseas. Returns the first failure.
+func validateGames(cidrs []string, anchors []string) error {
+	if len(cidrs) == 0 {
+		return fmt.Errorf("games-ip set is empty (ASN fetch failed?)")
+	}
+	prefixes := make([]netip.Prefix, 0, len(cidrs))
+	for _, c := range cidrs {
+		if p, err := netip.ParsePrefix(c); err == nil {
+			prefixes = append(prefixes, p)
+		}
+	}
+	for _, a := range anchors {
+		ip, err := netip.ParseAddr(a)
+		if err != nil {
+			return fmt.Errorf("invalid anchor %q: %w", a, err)
+		}
+		covered := false
+		for _, p := range prefixes {
+			if p.Contains(ip) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			return fmt.Errorf("games-ip missing anchor %s (vendor ASN changed?)", a)
 		}
 	}
 	return nil
