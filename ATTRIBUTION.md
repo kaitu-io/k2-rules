@@ -10,7 +10,7 @@ preserving attribution as required.
 - **v2fly/domain-list-community** — MIT License
   - https://github.com/v2fly/domain-list-community
   - Copyright (c) 2017–present v2fly contributors
-  - Used for: `overseas`, `cn-sites`, `ir-sites`, `ru-sites`, `mm-sites`
+  - Used for: `overseas`, `cn-sites`, `ir-sites`, `ru-sites`, `mm-sites`, `games-sites`
 
 - **citizenlab/test-lists** — CC-BY-SA 4.0
   - https://github.com/citizenlab/test-lists
@@ -51,6 +51,13 @@ preserving attribution as required.
   - Companion to russia-blocked-geoip: curated list of ~75k blocked domains
     from the RKN registry. Auto-updated every 6 hours.
   - Used for: the domain side of `ru-blocked`.
+
+- **ipverse/asn-ip** — CC0 1.0 Universal (public domain dedication)
+  - https://github.com/ipverse/asn-ip (repo now canonically named
+    `ipverse/as-ip-blocks`; `asn-ip` redirects to it)
+  - Per-ASN aggregated CIDR lists, one file per ASN, auto-updated daily.
+  - Used for: `tencent-overseas` (AS132203) and `games-ip` (AS32590 Valve,
+    AS6507 Riot, AS57976 Blizzard, AS33353 Sony/Gaikai).
 
 ## Official Public IP Ranges
 
