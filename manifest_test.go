@@ -79,3 +79,29 @@ func TestBuildManifest_KRSWinsSharedKey(t *testing.T) {
 		t.Errorf("overseas size = %d, want %d (.krs size)", ov.Size, len(krsBytes))
 	}
 }
+
+// TestValidateManifestVersion pins the build-time RFC3339 gate: the k2 client
+// silently freezes OTA rule updates when manifest version isn't RFC3339, so
+// the generator must refuse to write one.
+func TestValidateManifestVersion(t *testing.T) {
+	// What buildManifest actually emits must pass the gate (derive from the
+	// real producer, don't mirror its format string).
+	m := buildManifest(t.TempDir())
+	if err := validateManifestVersion(m.Version); err != nil {
+		t.Errorf("buildManifest version %q rejected: %v", m.Version, err)
+	}
+
+	if err := validateManifestVersion("2026-01-02T15:04:05Z"); err != nil {
+		t.Errorf("valid RFC3339 rejected: %v", err)
+	}
+
+	// The historical regression: vendored v0.1.4 emitted plain dates via
+	// time.Now().Format("2006-01-02"). That shape must fail the build.
+	if err := validateManifestVersion("2026-01-02"); err == nil {
+		t.Error(`plain date "2026-01-02" accepted; must be rejected — clients would silently stop updating rules`)
+	}
+
+	if err := validateManifestVersion(""); err == nil {
+		t.Error("empty version accepted; must be rejected")
+	}
+}
