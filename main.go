@@ -153,6 +153,9 @@ func main() {
 	// Generate manifest from whatever .k2b + app-bypass-*.yaml files are
 	// present in the output dir.
 	manifest := buildManifest(*outDir)
+	if err := validateManifestVersion(manifest.Version); err != nil {
+		log.Fatalf("manifest version: %v", err)
+	}
 	manifestData, _ := json.MarshalIndent(manifest, "", "  ")
 	if err := os.WriteFile(filepath.Join(*outDir, "manifest.json"), manifestData, 0644); err != nil {
 		log.Fatalf("write manifest: %v", err)
@@ -992,6 +995,19 @@ func reverseStr(s string) string {
 // ============================================================================
 // Manifest
 // ============================================================================
+
+// validateManifestVersion asserts the manifest version string is valid RFC3339
+// before it is written out. The k2 client (rule/manifest.go parseVersion) runs
+// time.Parse(time.RFC3339, version) and silently maps a parse failure to the
+// zero time — remoteNewer is then permanently false and OTA rule updates freeze
+// fleet-wide with no log line. A format regression here (the generator once
+// emitted plain "2006-01-02" dates) must fail the build, not the fleet.
+func validateManifestVersion(v string) error {
+	if _, err := time.Parse(time.RFC3339, v); err != nil {
+		return fmt.Errorf("manifest version %q is not RFC3339: %w", v, err)
+	}
+	return nil
+}
 
 type manifest struct {
 	SchemaVersion int                       `json:"schemaVersion"`
