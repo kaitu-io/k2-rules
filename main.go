@@ -118,6 +118,24 @@ func main() {
 		}
 	}
 
+	// Build ageverify standalone bundle (sites that gate visitors by IP under
+	// an age-assurance law; see ageVerifyServices). Skipped under -country.
+	// Fail-closed like games: a renamed v2fly data file must fail the build,
+	// not silently ship a bundle with one service missing.
+	if *onlyCountry == "" {
+		log.Println("=== building ageverify.krs ===")
+		avSets, err := buildSets(ageVerifyServices, v2flyDir)
+		if err != nil {
+			log.Fatalf("build ageverify: %v", err)
+		}
+		if err := validateAgeVerify(avSets, ageVerifyAnchors); err != nil {
+			log.Fatalf("ageverify validation failed: %v", err)
+		}
+		if err := writeKRSBundle(filepath.Join(*outDir, "ageverify.krs"), avSets, nil); err != nil {
+			log.Fatalf("write ageverify.krs: %v", err)
+		}
+	}
+
 	// Build per-country bundles. Each country gets:
 	//   <cc>-direct.k2b  — legacy routing-only bundle
 	//   <cc>.krs         — unified routing + app patterns (current format)
@@ -258,6 +276,31 @@ func validateGames(cidrs []string, anchors []string) error {
 		}
 		if !covered {
 			return fmt.Errorf("games-ip missing anchor %s (vendor ASN changed?)", a)
+		}
+	}
+	return nil
+}
+
+// validateAgeVerify fail-closes the ageverify.krs build: every set named in
+// anchors must exist and contain each of its anchor domains.
+func validateAgeVerify(sets []bundleSet, anchors map[string][]string) error {
+	byName := make(map[string]map[string]bool, len(sets))
+	for _, s := range sets {
+		have := make(map[string]bool, len(s.Domains))
+		for _, d := range s.Domains {
+			have[d] = true
+		}
+		byName[s.Name] = have
+	}
+	for name, want := range anchors {
+		have, ok := byName[name]
+		if !ok {
+			return fmt.Errorf("set %q missing", name)
+		}
+		for _, a := range want {
+			if !have[a] {
+				return fmt.Errorf("%s missing anchor %s (v2fly data file renamed?)", name, a)
+			}
 		}
 	}
 	return nil

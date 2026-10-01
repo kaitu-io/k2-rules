@@ -99,6 +99,9 @@ jobs:
           # The games routing feature depends on games.krs being in the archive.
           grep -qE '(^|/)games\.krs$' <<<"$names" \
             || { echo "FAIL: games.krs missing from krs.tar.gz"; exit 1; }
+          # The age-verification routing profile depends on ageverify.krs.
+          grep -qE '(^|/)ageverify\.krs$' <<<"$names" \
+            || { echo "FAIL: ageverify.krs missing from krs.tar.gz"; exit 1; }
           # k2-rules.tar.gz is the inverse: legacy .k2b only, zero .krs (clean
           # split — no consumer crosses formats).
           legacy=$(tar -tzf k2-rules.tar.gz)
