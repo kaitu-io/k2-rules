@@ -274,6 +274,26 @@ var countries = []country{
 
 	// Uzbekistan — significant censorship of political/media content.
 	{Code: "uz", Name: "Uzbekistan", Services: citizenlabBasic("uz")},
+
+	// United Kingdom — not a censorship market: this bundle exists so a UK
+	// user's split tunnel keeps domestic traffic (banking, iPlayer, gov.uk)
+	// on the local line. Not citizenlabBasic: the ccTLD is ".uk", not ".gb",
+	// so the generic `OrphanDomains: {cc}` would match nothing.
+	{
+		Code: "gb", Name: "United Kingdom",
+		Services: []service{
+			{
+				Name:   "geoip-gb",
+				IPURLs: []string{"https://raw.githubusercontent.com/Loyalsoldier/geoip/release/text/gb.txt"},
+			},
+			{
+				Name:             "gb-sites",
+				V2flyNames:       []string{"bbc", "sky", "category-scholar-uk"},
+				CitizenLabCSVURL: "https://raw.githubusercontent.com/citizenlab/test-lists/master/lists/gb.csv",
+				OrphanDomains:    []string{"uk"},
+			},
+		},
+	},
 }
 
 // tencentOverseasServices builds the tencent-overseas.krs standalone bundle:
@@ -386,6 +406,84 @@ var gamesAnchors = []string{
 	"43.229.64.1",  // AS6507 Riot Games — placeholder, from 43.229.64.0/22 (asn-ip, 2026-08-04)
 	"5.42.160.1",   // AS57976 Blizzard — placeholder, from 5.42.160.0/20 (asn-ip, 2026-08-04)
 	"69.36.129.1",  // AS33353 Sony/Gaikai — placeholder, from 69.36.129.0/24 (asn-ip, 2026-08-04)
+}
+
+// ageVerifyServices builds the ageverify.krs standalone bundle: the sites that
+// gate or block visitors by IP geolocation under an age-assurance law.
+//
+// The motivating jurisdiction is GB — the UK Online Safety Act 2023 (enforced
+// by Ofcom since 2025-07-25) is a UK statute, independent of EU law, and is
+// the only regime that reaches beyond adult sites into social, music, gaming
+// and dating services. The EU is NOT one jurisdiction here: the DSA layer
+// covers adult platforms only and FR / IT / DE each enforce their own rules.
+// Hence two sets rather than one "eu" set:
+//
+//   - ageverify-adult — adult sites. Jurisdiction-neutral: the same list is
+//     what a future FR or IT profile would need, so it carries no country tag.
+//   - ageverify-gb    — the non-adult services that demand a selfie/ID from a
+//     UK IP specifically. A future FR/IT set would be a sibling
+//     (ageverify-fr), not an edit to this one.
+//
+// Client routing semantics: referenced by match.names with a proxy `via`, in
+// a profile where everything else stays direct — the inverse of the
+// "{cc}-access → direct" country profiles. The exit must be outside GB (and,
+// for ageverify-adult, outside FR / IT / DE and the US states with equivalent
+// laws); choosing the exit is the client's job, this bundle is pure data.
+//
+// Deliberately left out — global checks that no exit changes, so routing them
+// would cost bandwidth and fix nothing: roblox, youtube.
+//
+// Standalone bundle (not a set inside any <cc>.krs) so region expansion does
+// NOT sweep it into a direct route.
+var ageVerifyServices = []service{
+	{
+		Name:       "ageverify-adult",
+		V2flyNames: []string{"category-porn"},
+		// redgifs / civitai block UK visitors outright rather than verify.
+		OrphanDomains: []string{"civitai.com"},
+	},
+	{
+		Name: "ageverify-gb",
+		V2flyNames: []string{
+			"reddit",
+			"discord",
+			"bluesky",
+			"twitter",
+			"spotify",
+			"steam",
+			"xbox",
+		},
+		// Dating apps have no v2fly data file (checked 2026-10-01: tinder,
+		// grindr, bumble, hinge, feeld all 404). Primary domains only — the
+		// age gate lives on the API/web origin, not on their CDNs.
+		OrphanDomains: []string{
+			"tinder.com",
+			"gotinder.com",
+			"hinge.co",
+			"grindr.com",
+			"grindr.mobi",
+			"feeld.co",
+			"bumble.com",
+		},
+	},
+}
+
+// ageVerifyAnchors are domains each set must contain, one per upstream source.
+// buildSets WARN-continues when a v2fly data file is renamed or removed, which
+// would silently drop that whole service from the bundle; the anchor turns
+// that into a build failure. Keep one anchor per V2flyNames entry
+// (ageverify_test.go enforces the count).
+var ageVerifyAnchors = map[string][]string{
+	"ageverify-adult": {"pornhub.com"},
+	"ageverify-gb": {
+		"reddit.com",
+		"discord.com",
+		"bsky.app",
+		"x.com",
+		"spotify.com",
+		"steampowered.com",
+		"xbox.com",
+	},
 }
 
 // citizenlabBasic returns the default two-service recipe for a country with

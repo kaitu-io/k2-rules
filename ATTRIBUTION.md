@@ -10,7 +10,7 @@ preserving attribution as required.
 - **v2fly/domain-list-community** — MIT License
   - https://github.com/v2fly/domain-list-community
   - Copyright (c) 2017–present v2fly contributors
-  - Used for: `overseas`, `cn-sites`, `ir-sites`, `ru-sites`, `mm-sites`, `games-sites`
+  - Used for: `overseas`, `cn-sites`, `ir-sites`, `ru-sites`, `mm-sites`, `games-sites`, `ageverify-adult`, `ageverify-gb`
 
 - **citizenlab/test-lists** — CC-BY-SA 4.0
   - https://github.com/citizenlab/test-lists
