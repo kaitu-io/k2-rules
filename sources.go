@@ -274,6 +274,26 @@ var countries = []country{
 
 	// Uzbekistan — significant censorship of political/media content.
 	{Code: "uz", Name: "Uzbekistan", Services: citizenlabBasic("uz")},
+
+	// United Kingdom — not a censorship market: this bundle exists so a UK
+	// user's split tunnel keeps domestic traffic (banking, iPlayer, gov.uk)
+	// on the local line. Not citizenlabBasic: the ccTLD is ".uk", not ".gb",
+	// so the generic `OrphanDomains: {cc}` would match nothing.
+	{
+		Code: "gb", Name: "United Kingdom",
+		Services: []service{
+			{
+				Name:   "geoip-gb",
+				IPURLs: []string{"https://raw.githubusercontent.com/Loyalsoldier/geoip/release/text/gb.txt"},
+			},
+			{
+				Name:             "gb-sites",
+				V2flyNames:       []string{"bbc", "sky", "category-scholar-uk"},
+				CitizenLabCSVURL: "https://raw.githubusercontent.com/citizenlab/test-lists/master/lists/gb.csv",
+				OrphanDomains:    []string{"uk"},
+			},
+		},
+	},
 }
 
 // tencentOverseasServices builds the tencent-overseas.krs standalone bundle:
