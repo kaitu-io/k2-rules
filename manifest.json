@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "version": "2026-11-10T07:33:16Z",
+  "version": "2026-11-11T06:50:58Z",
   "bundles": {
     "ae": {
       "sha256": "684422d5aa7cf4a9e3eec61d64374c53166dec87cb539985c8deeda2e1f06643",
@@ -8,7 +8,7 @@
       "ruleCount": 5037
     },
     "ae-direct": {
-      "sha256": "2ba57937c89481f31b0002427349ace3f25df90c06a96dd86a6549cb77195535",
+      "sha256": "145085695ad32dde3479d0c5fdc7e1d1902e6bbb7cfa297546c14df599878d6d",
       "size": 126778,
       "ruleCount": 0
     },
@@ -23,7 +23,7 @@
       "ruleCount": 5015
     },
     "bd-direct": {
-      "sha256": "17cf23e08b4870946fe16886ae1d9196d7e4805e13b641409a5f357edc21990a",
+      "sha256": "27c5dbd0dc04510728dab6b4404d1445c7a36392ae3036b276f5a6f1cefe5ea6",
       "size": 96967,
       "ruleCount": 0
     },
@@ -33,17 +33,17 @@
       "ruleCount": 1101
     },
     "by-direct": {
-      "sha256": "68d4febc3c23d17d10310bc840c0a76a3c5cc7ae5e6635fd93c2dd33b433a209",
+      "sha256": "07280d5f8b77a55b05c8f867894726a850e01f85ed300fbedeee9dccb1618c3a",
       "size": 22798,
       "ruleCount": 0
     },
     "cn": {
-      "sha256": "19df24ef7e71bd73e9c55fa702f5f91f6cc78c213ae86bc8eeb932af99f32f41",
+      "sha256": "9395faa8fdd3fc4e9578cc5ba91a989b50a5601781cdeaca09c389339fdca161",
       "size": 309510,
       "ruleCount": 15905
     },
     "cn-direct": {
-      "sha256": "1b7c4581de7b4a72492ac4618422fcdc406e4484d7265e6442f2f90ae1f14987",
+      "sha256": "fcab955f569dd0234f3f69e0776e49e2e836299eec61b3758b004f8a2ed7a133",
       "size": 329140,
       "ruleCount": 0
     },
@@ -53,7 +53,7 @@
       "ruleCount": 1658
     },
     "eg-direct": {
-      "sha256": "1694add9496099264265214e8c589541fcc7c8223b4011267c5dde5acb8c7d79",
+      "sha256": "0773fef0e2e832e0490bd9d53d4e7f4990269e9ea4554ee6c28c7ecf83dfbc9c",
       "size": 30926,
       "ruleCount": 0
     },
@@ -68,7 +68,7 @@
       "ruleCount": 30273
     },
     "gb-direct": {
-      "sha256": "dc35c0621cdb086c6d7e64bf2b6874a9592e65f84591a2728090360d0404487d",
+      "sha256": "2ccac9d1e128df673a2873af2abc400901eaadcb9a78885fd2dc9e0c8f020829",
       "size": 766705,
       "ruleCount": 0
     },
@@ -78,7 +78,7 @@
       "ruleCount": 10076
     },
     "id-direct": {
-      "sha256": "180354667018234e9b178744ed9798f2855b79073c0e90accfef595d4b0e9747",
+      "sha256": "fc94d9f8a48f37a4be3cea2c72356e7e836b083c5ba98676532153505513d0d7",
       "size": 207770,
       "ruleCount": 0
     },
@@ -88,7 +88,7 @@
       "ruleCount": 131132
     },
     "ir-direct": {
-      "sha256": "423ba3bc77b6ab4fa546393ebd8b25e4a5582dc3599263a1a1d6e5be219f839f",
+      "sha256": "9399cd389c70a426e83e67e9ff2e2d6b31e7a0e50b0af22d292d73bee85b7ade",
       "size": 2349877,
       "ruleCount": 0
     },
@@ -98,7 +98,7 @@
       "ruleCount": 2594
     },
     "kz-direct": {
-      "sha256": "0057904425f5b025f88a45b31fc01b04cb30557c9b6544b3cfebbc44774b0a12",
+      "sha256": "8e360e5324e150730a9d650d1929d341ddb8496ac4d47ed6c9e66408b39162a9",
       "size": 53125,
       "ruleCount": 0
     },
@@ -108,7 +108,7 @@
       "ruleCount": 1565
     },
     "mm-direct": {
-      "sha256": "9df0a1c38564a06ac9562bfb6a66b5515b580268a0ee3a29b04c106e7f96810a",
+      "sha256": "3b543293eb86d56154e86883b3cb6c3150fcb564008cfaac8dff51a54d0f106c",
       "size": 35401,
       "ruleCount": 0
     },
@@ -123,7 +123,7 @@
       "ruleCount": 2302
     },
     "pk-direct": {
-      "sha256": "d773f244755ae07064a5362a39ede089c900d6796ebaab897db25e294ff4131a",
+      "sha256": "f6c2b63c0b95d7bc9fa0cc70780c03294ddca986cc79c00f0916899026839eb2",
       "size": 44596,
       "ruleCount": 0
     },
@@ -133,7 +133,7 @@
       "ruleCount": 172471
     },
     "ru-direct": {
-      "sha256": "731b5be5f23b8f6b660ffa923f79272ba6345912125f60ef04a911520212ee23",
+      "sha256": "7b1430a8aadef4996da90fe2514666f822e8b4cb1a497a6ded944b3ff0c58c87",
       "size": 2724972,
       "ruleCount": 0
     },
@@ -143,7 +143,7 @@
       "ruleCount": 2573
     },
     "sa-direct": {
-      "sha256": "d106ad7c94e2a8861e79c787217df414914158f188fd4b9ec30a2659107cac34",
+      "sha256": "b1da803ddad8da9d9aec105e51d928e074c51e3cf8e63424af69dfa60622ca28",
       "size": 54734,
       "ruleCount": 0
     },
@@ -158,7 +158,7 @@
       "ruleCount": 3168
     },
     "th-direct": {
-      "sha256": "6e48a1904f08a99aced611bfc7c7bf4e72e1288ef8384c3f16fca73b0b0a6e89",
+      "sha256": "bfbd9429cceddd29eca666c8f748454d12caa93bceeec4ef54158c5e375d13fa",
       "size": 98156,
       "ruleCount": 0
     },
@@ -168,7 +168,7 @@
       "ruleCount": 504
     },
     "tm-direct": {
-      "sha256": "897e9645d4be228129499c4081fc00340067d6e49fd9d72c9a579b00626daa66",
+      "sha256": "979729c19c03cb9637fcbd852a54ee11afabcd8d9ce33a330a4e9647acf4833e",
       "size": 9943,
       "ruleCount": 0
     },
@@ -178,7 +178,7 @@
       "ruleCount": 5035
     },
     "tr-direct": {
-      "sha256": "61a869ac629a78d18216d1415e9e51b784a6802615a804432039e78ca8a20b81",
+      "sha256": "fbc6088eb1911095c8b9484b969a61dac0006bf3e849d8d17cafa03bd3a87d5b",
       "size": 97302,
       "ruleCount": 0
     },
@@ -188,7 +188,7 @@
       "ruleCount": 975
     },
     "uz-direct": {
-      "sha256": "e97f1461be7114c0b66292bc58405b9937c362cfdd9c35902abd360d74f6057c",
+      "sha256": "1b20f4109ad7823889345b3c0d962fe22a1959f2df319d3621dd469c0d4d02d5",
       "size": 17695,
       "ruleCount": 0
     },
@@ -198,7 +198,7 @@
       "ruleCount": 3618
     },
     "vn-direct": {
-      "sha256": "ec0343507f1a145204de62de5462e7720a258367067081ecc2362c7719cba4cd",
+      "sha256": "72e290493622ecdb8115e678581158b86f67e7c4e83cea1486abc26e773bc47b",
       "size": 77830,
       "ruleCount": 0
     }
