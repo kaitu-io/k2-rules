@@ -190,28 +190,9 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
 
-          # Fetch + check out release branch (it was created by manual bootstrap).
-          git fetch origin release
-          git checkout release
-
-          # Replace all contents with the freshly-built artifact set.
-          # Release branch carries the 4 published artifacts only; no source,
-          # no loose per-country bundles. The git rm below wipes any loose
-          # .k2b/.krs left from earlier (pre-cleanup) nightlies.
-          # Wipe both tracked (git rm) and untracked (workspace leftovers from
-          # earlier build steps — dist/, k2-rules-gen — that master ignores
-          # via .gitignore but release branch does not).
-          git rm -rf . 2>/dev/null || true
-          rm -rf dist k2-rules-gen
-          cp /tmp/release-artifacts/* .
-
-          git add .
-          if git diff --cached --quiet; then
-            echo "no changes to release branch"
-            exit 0
-          fi
-          git commit -m "nightly: $(date -u +%Y-%m-%dT%H:%MZ)"
-          git push origin release
+          # Replace the release branch with one parentless commit holding
+          # exactly these artifacts — see the script for why it does not append.
+          scripts/sync-release-branch.sh /tmp/release-artifacts/*
 
       - name: Purge jsdelivr CDN cache
         if: steps.diff.outputs.changed == 'true'
