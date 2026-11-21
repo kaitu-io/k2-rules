@@ -154,6 +154,8 @@ Magic `K2RB`, 32-byte header, 36-byte index per set. Data sections: reversed-suf
 
 GitHub Actions daily at UTC 00:30. Only publishes a release (`vYYYY.MM.DD`) if bundle SHA256s differ from the previous release.
 
+The `release` branch (what jsdelivr serves as `@release`) always holds **exactly one parentless commit**: `scripts/sync-release-branch.sh` replaces it each run with `--force-with-lease` instead of appending. Appending kept every past tarball reachable — the repo hit 1 GB after 231 nightlies. Never commit to `release` by hand or build on its history; `master` and the tags are untouched by this.
+
 ## Gotchas
 
 - Requires `git` and `tar` on PATH (v2fly clone uses `tar xzf`)
