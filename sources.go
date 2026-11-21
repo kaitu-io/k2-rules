@@ -15,6 +15,12 @@ type service struct {
 	//   become ExcludeDomainSuffixes — Chinese except these subdomains.
 	ExcludeAttr string
 
+	// V2flySelective lists v2fly include specs ("name [@attr | @-attr]...")
+	// resolved with v2fly's selective-inclusion semantics — see
+	// resolveV2flySelective. Required for any set the client rejects, where
+	// V2flyNames' whole-file includes would over-block.
+	V2flySelective []string
+
 	// IP sources: URLs returning one CIDR per line (plain text).
 	IPURLs []string
 
@@ -484,6 +490,71 @@ var ageVerifyAnchors = map[string][]string{
 		"steampowered.com",
 		"xbox.com",
 	},
+}
+
+// adsServices builds the ads.krs standalone bundle: one domain-only set, `ads`,
+// of hosts that exist to serve advertising or tracking.
+//
+// Client routing semantics: referenced by match.names with via:reject, placed
+// ahead of every other route (a CN ad host is also in cn-sites and would
+// otherwise win `direct` first). The DNS layer answers NXDOMAIN, so this is
+// host-level blocking only — ads served from a content host (YouTube, an
+// app's own API) are out of reach by construction. Whether and when to emit
+// the route is the client's decision; this bundle is pure data and is inert
+// until a client names it.
+//
+// Because the action is reject, over-inclusion is the dangerous failure, not
+// under-inclusion. Two consequences:
+//
+//   - V2flySelective, not V2flyNames: category-ads is built from
+//     `include:google @ads`-style selective includes, and resolving those as
+//     whole-file includes would put google / apple / alibaba in the set.
+//   - The source is the conservative half of v2fly's ads data. category-ads
+//     is "domains clearly serving ads or tracking"; category-ads-all also
+//     includes whole provider files (sentry, segment, adjust, ...), i.e. the
+//     vendors' own sites and dashboards. Only its @ads-tagged rules are
+//     taken, which adds the large ad exchanges it lists inline without
+//     blocking sentry.io for the people who work in it.
+//
+// Standalone bundle (not a set inside any <cc>.krs) so region expansion does
+// NOT sweep it into a direct route.
+var adsServices = []service{
+	{
+		Name: "ads",
+		V2flySelective: []string{
+			"category-ads",
+			"category-ads-all @ads",
+		},
+	},
+}
+
+// adsAnchors are domains the `ads` set must contain, one per V2flySelective
+// spec (ads_test.go enforces the count), so a renamed or emptied v2fly file
+// fails the build instead of shipping a no-op reject route.
+var adsAnchors = map[string][]string{
+	"ads": {
+		"doubleclick.net", // category-ads, via `include:google @ads`
+		"adnxs.com",       // category-ads-all, inline @ads rule
+	},
+}
+
+// adsMustNotBlock are hosts the `ads` set must never cover, by exact match or
+// by a parent suffix. Each is the content host of a vendor whose data file
+// category-ads selectively includes, so any of them being covered means the
+// selective include degraded into a whole-file include — the build must fail
+// rather than ship a set that blocks the vendor outright.
+var adsMustNotBlock = []string{
+	"www.google.com",
+	"www.youtube.com",
+	"www.apple.com",
+	"www.microsoft.com",
+	"www.amazon.com",
+	"www.facebook.com",
+	"www.baidu.com",
+	"www.taobao.com",
+	"www.jd.com",
+	"www.qq.com",
+	"sentry.io",
 }
 
 // citizenlabBasic returns the default two-service recipe for a country with
