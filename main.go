@@ -136,6 +136,24 @@ func main() {
 		}
 	}
 
+	// Build ads standalone bundle (ad/tracking hosts the client may reject;
+	// see adsServices). Skipped under -country. Fail-closed in both
+	// directions: a missing anchor means a source vanished, a covered
+	// must-not-block host means the set would block a whole vendor.
+	if *onlyCountry == "" {
+		log.Println("=== building ads.krs ===")
+		adsSets, err := buildSets(adsServices, v2flyDir)
+		if err != nil {
+			log.Fatalf("build ads: %v", err)
+		}
+		if err := validateAds(adsSets, adsAnchors, adsMustNotBlock); err != nil {
+			log.Fatalf("ads validation failed: %v", err)
+		}
+		if err := writeKRSBundle(filepath.Join(*outDir, "ads.krs"), adsSets, nil); err != nil {
+			log.Fatalf("write ads.krs: %v", err)
+		}
+	}
+
 	// Build per-country bundles. Each country gets:
 	//   <cc>-direct.k2b  — legacy routing-only bundle
 	//   <cc>.krs         — unified routing + app patterns (current format)
@@ -306,6 +324,34 @@ func validateAgeVerify(sets []bundleSet, anchors map[string][]string) error {
 	return nil
 }
 
+// validateAds fail-closes the ads.krs build. It reuses validateAgeVerify for
+// the anchors, then rejects any set that covers a mustNotBlock host — exactly
+// or through a parent suffix, which is how the client matches.
+func validateAds(sets []bundleSet, anchors map[string][]string, mustNotBlock []string) error {
+	if err := validateAgeVerify(sets, anchors); err != nil {
+		return err
+	}
+	for _, s := range sets {
+		have := make(map[string]bool, len(s.Domains))
+		for _, d := range s.Domains {
+			have[d] = true
+		}
+		for _, host := range mustNotBlock {
+			for suffix := host; suffix != ""; {
+				if have[suffix] {
+					return fmt.Errorf("%s would block %s (covered by %q) — selective include degraded?", s.Name, host, suffix)
+				}
+				dot := strings.IndexByte(suffix, '.')
+				if dot < 0 {
+					break
+				}
+				suffix = suffix[dot+1:]
+			}
+		}
+	}
+	return nil
+}
+
 // buildSets builds BundleSet data for a list of services.
 func buildSets(svcs []service, v2flyDir string) ([]bundleSet, error) {
 	var sets []bundleSet
@@ -325,6 +371,17 @@ func buildSets(svcs []service, v2flyDir string) ([]bundleSet, error) {
 			domains = append(domains, inc...)
 			excludeDomains = append(excludeDomains, exc...)
 			log.Printf("    v2fly/%s: %d domains, %d excludes (%d files)", name, len(inc), len(exc), len(visited))
+		}
+
+		// v2fly specs resolved with selective inclusion (reject-safe).
+		for _, spec := range svc.V2flySelective {
+			doms, err := resolveV2flySelective(filepath.Join(v2flyDir, "data"), spec)
+			if err != nil {
+				log.Printf("    WARN: v2fly-selective/%s: %v", spec, err)
+				continue
+			}
+			domains = append(domains, doms...)
+			log.Printf("    v2fly-selective/%s: %d domains", spec, len(doms))
 		}
 
 		// Citizen Lab test-lists CSV — URL-format, one URL per row.
