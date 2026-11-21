@@ -81,3 +81,6 @@ redistributors must:
 
 The compiler tool (`k2-rules-gen`) source code itself remains under the
 repository's project license and is not affected by the bundle license.
+
+- **Tranco** — https://tranco-list.eu (Le Pochat et al., NDSS 2019)
+  - Used for: one-time seed of `ads/never-block.txt` (top 2000 of the 2026-11-21 daily list). Not fetched at build time, not part of any published bundle.
