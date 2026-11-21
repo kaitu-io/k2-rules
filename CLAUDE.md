@@ -119,7 +119,16 @@ Not every `.krs` is per-region or the single overseas umbrella. Some are standal
 
   **Reject sets must use `V2flySelective`, never `V2flyNames`.** `category-ads` is built from selective includes (`include:google @ads` = only google's `@ads` rules). `parseV2flyRecursive` ignores the filter and takes the whole file — measured 9,979 domains including `google.com`, against 893 through `resolveV2flySelective` (`v2fly_selective.go`). Harmless for a direct/proxy set, fatal for a rejected one. `ads_test.go` pins the service shape.
 
-  Fail-closed both ways (`validateAds`, `main.go`): a missing anchor in `adsAnchors` (one per spec) means a source vanished; a host in `adsMustNotBlock` being covered — exactly or by a parent suffix — means a selective include degraded into a whole-file one. Same whole-build blast radius as games.
+  **Upstream is not trusted — two automatic gates (`ads_gate.go`), no human in the loop:**
+
+  1. *Shape + never-block.* An entry is dropped if it is not a plausible single host (public suffix such as `co.uk` / `github.io`, bare TLD, IP literal) or if blocking it would also block a host in `ads/never-block.txt` (equal to it, or a parent suffix of it). That file is ours — hand-kept, never fetched — seeded from our own hosts, payment / store / connectivity-check hosts and the Tranco top 2000. Adding a host is always safe.
+  2. *14-day quarantine.* `ads/ledger.tsv` records the date each upstream entry was first seen. A new entry is emitted only after it has stayed upstream for 14 days; withdrawn meanwhile, it is forgotten and never reached a user; re-added, the clock restarts. Removals apply at once. Rows marked `baseline` are the entries present when the ledger was created.
+
+  The ledger is **machine-written**: the build rewrites it in the working tree and CI commits it to master (`scripts/commit-ads-ledger.sh`, every night, bundles changed or not). Its git history is the record of what upstream added and removed. A local `go run . -o dist` rewrites it too — harmless to commit, but never hand-edit a date. A lost write can only lengthen a quarantine. When the gate rejects a *new* entry the nightly publishes normally and then goes red once (`Report rejected ads entries`); if the entry is a real ad host, remove its match from `ads/never-block.txt`.
+
+  What the gates do **not** catch: a wrong entry for a site outside `never-block.txt` that upstream leaves in place for 14 days.
+
+  Behind the gates, a last invariant on the emitted set (`validateAds`, `main.go`): a missing anchor in `adsAnchors` (one per spec) means a source vanished; a host in `adsMustNotBlock` being covered — exactly or by a parent suffix — means a selective include degraded into a whole-file one. Same whole-build blast radius as games; with the gates in front, this only fires if upstream loses an anchor or `never-block.txt` loses a must-not-block host (`ads_gate_test.go` pins the latter).
 
 ## k2 Migration Contract
 

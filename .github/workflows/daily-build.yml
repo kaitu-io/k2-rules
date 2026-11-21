@@ -33,7 +33,9 @@ jobs:
         run: go build -o k2-rules-gen .
 
       - name: Generate rule bundles
-        run: ./k2-rules-gen -o dist
+        # -ads-alert: the ads gate writes newly rejected upstream entries here;
+        # the last step turns that into a red run AFTER everything is published.
+        run: ./k2-rules-gen -o dist -ads-alert /tmp/ads-alert.txt
 
       - name: Show output
         run: ls -lh dist/
@@ -57,6 +59,14 @@ jobs:
         env:
           PREV_MANIFEST: /tmp/prev/manifest.json
         run: go run ./tools/validate-krs dist
+
+      - name: Commit ads ledger
+        # Runs every night, changed bundles or not: an entry entering
+        # quarantine changes the ledger without changing any bundle.
+        run: |
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          scripts/commit-ads-ledger.sh
 
       - name: Build tarball + VERSION
         run: |
@@ -210,3 +220,19 @@ jobs:
             # 5s connect / 15s total — purge endpoint is best-effort, never fail the build
             curl -sS --max-time 15 --connect-timeout 5 -o /dev/null -w '  %{http_code}\n' "${base}/${p}" || echo "  (purge failed, non-fatal)"
           done
+
+      - name: Report rejected ads entries
+        # The gate already dropped these, so the release above is safe. Going
+        # red is the notification: upstream tried to add something that would
+        # block a never-block host or is not a plausible ad host. Each entry
+        # is reported once (the ledger remembers it), so the next run is green.
+        run: |
+          if [ -s /tmp/ads-alert.txt ]; then
+            while IFS= read -r line; do
+              echo "::error title=ads entry rejected::${line}"
+            done < /tmp/ads-alert.txt
+            echo "Upstream v2fly added ads entries the gate refused. Nothing was blocked." >&2
+            echo "Review them; if one is a real ad host, remove its match from ads/never-block.txt." >&2
+            exit 1
+          fi
+          echo "no ads entries rejected"

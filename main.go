@@ -30,6 +30,9 @@ import (
 func main() {
 	outDir := flag.String("o", "dist", "output directory")
 	onlyCountry := flag.String("country", "", "build only this country code (for local testing, e.g. -country=ru)")
+	adsLedgerPath := flag.String("ads-ledger", "ads/ledger.tsv", "ads quarantine ledger, read and rewritten in place")
+	adsNeverBlockPath := flag.String("ads-never-block", "ads/never-block.txt", "hosts the ads set must never cover")
+	adsAlertPath := flag.String("ads-alert", "", "if set, write newly rejected ads entries here (file is created only when there are any)")
 	flag.Parse()
 
 	if err := os.MkdirAll(*outDir, 0755); err != nil {
@@ -146,8 +149,38 @@ func main() {
 		if err != nil {
 			log.Fatalf("build ads: %v", err)
 		}
+		// Gate the upstream list (shape + never-block, then quarantine) before
+		// anything is written — see ads_gate.go.
+		ledger, err := readAdsLedger(*adsLedgerPath)
+		if err != nil {
+			log.Fatalf("ads ledger: %v", err)
+		}
+		neverBlock, err := readHostList(*adsNeverBlockPath)
+		if err != nil {
+			log.Fatalf("ads never-block list: %v", err)
+		}
+		if len(adsSets) != 1 {
+			log.Fatalf("ads: want exactly one set, got %d", len(adsSets))
+		}
+		active, nextLedger, rep := reconcileAds(adsSets[0].Domains, ledger, newAdsGate(neverBlock), time.Now())
+		adsSets[0].Domains = active
+		log.Printf("  ads gate: %d active, %d in quarantine, +%d new, %d graduated, -%d removed, %d newly rejected",
+			rep.Active, rep.Pending, len(rep.Added), len(rep.Graduated), len(rep.Removed), len(rep.NewRejected))
+		for _, r := range rep.NewRejected {
+			log.Printf("    REJECTED: %s", r)
+		}
 		if err := validateAds(adsSets, adsAnchors, adsMustNotBlock); err != nil {
 			log.Fatalf("ads validation failed: %v", err)
+		}
+		// Persist only after validation: a failed build must not advance the
+		// ledger, or a broken upstream fetch would be recorded as removals.
+		if err := writeAdsLedger(*adsLedgerPath, nextLedger); err != nil {
+			log.Fatalf("write ads ledger: %v", err)
+		}
+		if *adsAlertPath != "" && len(rep.NewRejected) > 0 {
+			if err := os.WriteFile(*adsAlertPath, []byte(strings.Join(rep.NewRejected, "\n")+"\n"), 0o644); err != nil {
+				log.Fatalf("write ads alert: %v", err)
+			}
 		}
 		if err := writeKRSBundle(filepath.Join(*outDir, "ads.krs"), adsSets, nil); err != nil {
 			log.Fatalf("write ads.krs: %v", err)
